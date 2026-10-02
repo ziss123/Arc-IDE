@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "build": "vite build",
     "server": "node server/index.js",
     "deploy:self": "bun run ./scripts/self-deploy.ts",
     "compass:deploy": "bun run ./scripts/compass-deploy.ts",
