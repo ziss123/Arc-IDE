@@ -13,23 +13,29 @@ function findImports(importPath) {
       try {
         return { contents: fs.readFileSync(candidate, "utf8") };
       } catch {
-        return { error: `Tidak bisa baca: ${candidate}` };
+        return { error: `Unable to read import: ${candidate}` };
       }
     }
   }
 
-  return { error: `Import tidak ditemukan: ${importPath}` };
+  return { error: `Import not found: ${importPath}` };
 }
 
 export default function handler(req, res) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
-    return res.status(405).json({ error: "Method tidak diizinkan" });
+    return res.status(405).json({ error: "Method not allowed." });
   }
 
   const { fileName = "Contract.sol", source } = req.body ?? {};
-  if (typeof source !== "string" || source.length === 0) {
-    return res.status(400).json({ error: "source kosong" });
+  if (typeof source !== "string" || !source.trim()) {
+    return res.status(400).json({ error: "Solidity source must be a non-empty string." });
+  }
+  if (Buffer.byteLength(source, "utf8") > 4 * 1024 * 1024) {
+    return res.status(413).json({ error: "Solidity source exceeds the 4 MB compile server limit." });
+  }
+  if (typeof fileName !== "string" || !fileName.trim() || fileName.length > 255) {
+    return res.status(400).json({ error: "fileName must be a non-empty string no longer than 255 characters." });
   }
 
   const input = {
@@ -54,24 +60,16 @@ export default function handler(req, res) {
   }
 
   const contracts = output.contracts?.[fileName];
-  let contractName;
-  let compiled;
-
-  if (contracts && Object.keys(contracts).length > 0) {
-    contractName = Object.keys(contracts)[0];
-    compiled = contracts[contractName];
-  } else {
-    for (const file of Object.values(output.contracts ?? {})) {
-      const entry = Object.entries(file).find(([, contract]) => contract.evm?.bytecode?.object);
-      if (entry) {
-        [contractName, compiled] = entry;
-        break;
-      }
-    }
-  }
+  const allContracts = contracts && Object.keys(contracts).length > 0
+    ? [contracts]
+    : Object.values(output.contracts ?? {});
+  const deployableContract = allContracts
+    .flatMap((file) => Object.entries(file))
+    .find(([, contract]) => contract.evm?.bytecode?.object);
+  const [contractName, compiled] = deployableContract ?? [];
 
   if (!contractName || !compiled) {
-    return res.status(400).json({ error: "Tidak ada contract yang berhasil di-compile." });
+    return res.status(400).json({ error: "No deployable contract was produced by the compiler." });
   }
 
   return res.status(200).json({

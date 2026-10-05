@@ -19,6 +19,12 @@ export interface AbiOutput {
   type: string;
 }
 
+export interface AbiParameter {
+  name: string;
+  type: string;
+  components?: AbiParameter[];
+}
+
 export function parseAbi(abi: InterfaceAbi): AbiFunction[] {
   if (!Array.isArray(abi)) return [];
   return (abi as unknown[]).filter(
@@ -40,12 +46,10 @@ export async function callReadFunction(
   args: unknown[]
 ): Promise<unknown> {
   const win = window as unknown as { ethereum?: { request: (a: { method: string; params?: unknown[] }) => Promise<unknown> } };
-  if (!win.ethereum) throw new Error("Wallet tidak terdeteksi");
+  if (!win.ethereum) throw new Error("No compatible wallet was detected.");
   const provider = new BrowserProvider(win.ethereum);
   const contract = new Contract(address, abi, provider);
-  const fn = contract[fnName] as ((...a: unknown[]) => Promise<unknown>) | undefined;
-  if (!fn) throw new Error(`Function ${fnName} tidak ditemukan`);
-  return fn(...args);
+  return contract.getFunction(fnName)(...args);
 }
 
 export async function callWriteFunction(
@@ -56,10 +60,11 @@ export async function callWriteFunction(
   signer: JsonRpcSigner
 ): Promise<{ txHash: string }> {
   const contract = new Contract(address, abi, signer);
-  const fn = contract[fnName] as ((...a: unknown[]) => Promise<TransactionResponse>) | undefined;
-  if (!fn) throw new Error(`Function ${fnName} tidak ditemukan`);
-  const tx: TransactionResponse = await fn(...args);
+  const tx: TransactionResponse = await contract.getFunction(fnName)(...args);
   const receipt = await tx.wait();
+  if (!receipt || receipt.status !== 1) {
+    throw new Error(`Transaction ${tx.hash} was not successful.`);
+  }
   return { txHash: receipt?.hash ?? tx.hash };
 }
 
@@ -84,20 +89,89 @@ export function formatResult(value: unknown): string {
   return JSON.stringify(value);
 }
 
-export function coerceArg(value: string, type: string): unknown {
+export function coerceArg(
+  value: string,
+  type: string,
+  components?: AbiParameter[],
+): unknown {
   const t = type.toLowerCase();
-  if (t === "bool") return value === "true" || value === "1";
-  if (t.startsWith("uint") || t.startsWith("int")) {
-    if (value.trim() === "") return 0n;
-    return BigInt(value.trim());
+  if (t === "bool") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true" || normalized === "1") return true;
+    if (normalized === "false" || normalized === "0") return false;
+    throw new Error(`Expected true or false for bool, received "${value}".`);
   }
-  if (t === "address") return value.trim();
-  if (t.includes("[]")) {
+
+  const arrayType = /^(.*)\[(\d*)\]$/.exec(t);
+  if (arrayType) {
+    let entries: unknown;
     try {
-      return JSON.parse(value) as unknown;
+      entries = JSON.parse(value) as unknown;
     } catch {
-      return value.split(",").map((v) => v.trim());
+      throw new Error(`Expected a JSON array for ${type}.`);
     }
+    if (!Array.isArray(entries)) throw new Error(`Expected a JSON array for ${type}.`);
+    if (arrayType[2] && entries.length !== Number(arrayType[2])) {
+      throw new Error(`Expected exactly ${arrayType[2]} values for ${type}.`);
+    }
+    return entries.map((entry) => coerceArg(
+      typeof entry === "string" ? entry : JSON.stringify(entry),
+      arrayType[1],
+      components,
+    ));
+  }
+
+  const integerType = /^(u?int)(\d*)$/.exec(t);
+  if (integerType) {
+    if (!value.trim()) throw new Error(`Enter a value for ${type}.`);
+    let integer: bigint;
+    try {
+      integer = BigInt(value.trim());
+    } catch {
+      throw new Error(`"${value}" is not a valid ${type}.`);
+    }
+    const bits = Number(integerType[2] || 256);
+    if (bits < 8 || bits > 256 || bits % 8 !== 0) throw new Error(`Invalid Solidity integer type: ${type}.`);
+    const unsigned = integerType[1] === "uint";
+    const min = unsigned ? 0n : -(1n << BigInt(bits - 1));
+    const max = unsigned ? (1n << BigInt(bits)) - 1n : (1n << BigInt(bits - 1)) - 1n;
+    if (integer < min || integer > max) throw new Error(`Value is outside the ${type} range.`);
+    return integer;
+  }
+
+  if (t === "address") {
+    const address = value.trim();
+    if (!isAddress(address)) throw new Error(`"${value}" is not a valid Ethereum address.`);
+    return address;
+  }
+  const fixedBytes = /^bytes(\d+)$/.exec(t);
+  if (t === "bytes" || fixedBytes) {
+    const bytes = value.trim();
+    if (!/^0x(?:[0-9a-fA-F]{2})*$/.test(bytes)) {
+      throw new Error(`Expected a 0x-prefixed even-length hex value for ${type}.`);
+    }
+    if (fixedBytes && (bytes.length - 2) / 2 !== Number(fixedBytes[1])) {
+      throw new Error(`Expected exactly ${fixedBytes[1]} bytes for ${type}.`);
+    }
+    return bytes;
+  }
+  if (t === "tuple" || t.startsWith("tuple(")) {
+    let tuple: unknown;
+    try {
+      tuple = JSON.parse(value) as unknown;
+    } catch {
+      throw new Error(`Expected a JSON array for ${type}.`);
+    }
+    if (!Array.isArray(tuple)) throw new Error(`Expected a JSON array for ${type}.`);
+    if (!components?.length) return tuple;
+    if (tuple.length !== components.length) {
+      throw new Error(`Expected exactly ${components.length} values for ${type}.`);
+    }
+    return tuple.map((entry, index) => coerceArg(
+      typeof entry === "string" ? entry : JSON.stringify(entry),
+      components[index].type,
+      components[index].components,
+    ));
   }
   return value;
 }

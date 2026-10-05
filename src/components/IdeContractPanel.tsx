@@ -1,11 +1,13 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import {
-  CheckCircle2, ExternalLink, Copy, ChevronDown, ChevronRight,
+  CheckCircle2, ExternalLink, ChevronDown, ChevronRight,
   Play, Pencil, Loader2, AlertCircle, X, RefreshCw, Hash, Rocket,
 } from "lucide-react";
-import type { JsonRpcSigner, InterfaceAbi } from "ethers";
-import { Contract, BrowserProvider, parseEther } from "ethers";
-import { coerceArg, formatResult } from "../lib/contractInteract";
+import type { JsonRpcSigner, InterfaceAbi, Provider } from "ethers";
+import { BrowserProvider, Contract, JsonRpcProvider, parseUnits } from "ethers";
+import { coerceArg, formatResult, type AbiParameter } from "../lib/contractInteract";
+import { CHAINS } from "../lib/chains";
+import CopyButton from "./CopyButton";
 
 interface ActiveContract {
   contractName: string;
@@ -30,8 +32,14 @@ interface AbiFunction {
   name: string;
   type: string;
   stateMutability: string;
-  inputs: { name: string; type: string }[];
-  outputs?: { name: string; type: string }[];
+  inputs: AbiInput[];
+  outputs?: AbiInput[];
+}
+
+interface AbiInput {
+  name: string;
+  type: string;
+  components?: AbiParameter[];
 }
 
 interface TxRecord {
@@ -42,9 +50,12 @@ interface TxRecord {
 }
 
 interface PendingDeploy {
+  contractName: string;
+  fileName: string;
+  chainKey: string;
   abi: InterfaceAbi;
   bytecode: string;
-  constructorInputs: { name: string; type: string }[];
+  constructorInputs: AbiInput[];
 }
 
 interface Props {
@@ -58,11 +69,77 @@ interface Props {
   compiling: boolean;
   pendingDeploy: PendingDeploy | null;
   constructorArgs: Record<string, string>;
-  onConstructorArgChange: (name: string, val: string) => void;
+  onConstructorArgChange: (index: number, val: string) => void;
 }
 
-function copyToClipboard(text: string) {
-  return navigator.clipboard.writeText(text);
+function canonicalAbiType(input: AbiInput): string {
+  if (!input.type.startsWith("tuple")) return input.type;
+  const suffix = input.type.slice("tuple".length);
+  return `(${(input.components ?? []).map(canonicalAbiType).join(",")})${suffix}`;
+}
+
+function functionKey(fn: AbiFunction): string {
+  return `${fn.name}(${fn.inputs.map(canonicalAbiType).join(",")})`;
+}
+
+function emptyFnState(): FnState {
+  return { open: false, args: {}, ethValue: "", result: null, loading: false, error: null };
+}
+
+function parseFunctionArgs(fn: AbiFunction, values: Record<string, string>): unknown[] {
+  return fn.inputs.map((input, index) => {
+    const value = values[String(index)] ?? "";
+    if (!value.trim() && input.type !== "string") {
+      throw new Error(`Enter a value for argument ${index + 1}${input.name ? ` (${input.name})` : ""}, type ${input.type}.`);
+    }
+    return coerceArg(value, input.type, input.components);
+  });
+}
+
+function isRpcConnectionError(error: unknown): boolean {
+  const message = errorText(error);
+  return /failed to fetch|network error|timeout|timed out|server response.*\b(429|5\d\d)\b|http\s+(429|5\d\d)/i.test(message);
+}
+
+function errorText(error: unknown, depth = 0): string {
+  if (error instanceof Error) {
+    if (depth >= 4) return error.message;
+    const cause = "cause" in error ? error.cause : undefined;
+    return cause === undefined ? error.message : `${error.message} ${errorText(cause, depth + 1)}`;
+  }
+  if (error && typeof error === "object") {
+    if (depth >= 4) return serializeErrorObject(error);
+    const details = error as Record<string, unknown>;
+    const nested = [details.message, details.error, details.info, details.cause]
+      .filter((value) => value !== undefined)
+      .map((value) => errorText(value, depth + 1))
+      .join(" ");
+    return nested || serializeErrorObject(error);
+  }
+  return String(error);
+}
+
+function serializeErrorObject(error: object): string {
+  try {
+    return JSON.stringify(error) ?? "Unknown error object.";
+  } catch {
+    return "Unknown error object (circular reference).";
+  }
+}
+
+function friendlyContractError(error: unknown, network: string): string {
+  if (error && typeof error === "object") {
+    const details = error as { shortMessage?: unknown; reason?: unknown; message?: unknown };
+    if (typeof details.reason === "string" && details.reason) return `Contract reverted: ${details.reason}`;
+    if (typeof details.shortMessage === "string" && details.shortMessage) return details.shortMessage;
+    if (typeof details.message === "string" && details.message) {
+      if (isRpcConnectionError(error)) {
+        return `Could not reach the ${network} RPC. Check your connection and try again. (${details.message})`;
+      }
+      return details.message;
+    }
+  }
+  return error && typeof error === "object" ? errorText(error) : String(error);
 }
 
 export default function IdeContractPanel({
@@ -75,6 +152,11 @@ export default function IdeContractPanel({
   const dragging = useRef(false);
   const startX = useRef(0);
   const startW = useRef(0);
+
+  useEffect(() => {
+    setStates({});
+    setTxHistory([]);
+  }, [contract?.address, contract?.network, contract?.txHash]);
 
   const onResizeMouseDown = useCallback((e: React.MouseEvent) => {
     dragging.current = true;
@@ -98,6 +180,9 @@ export default function IdeContractPanel({
   const abiArr = contract
     ? (Array.isArray(contract.abi) ? contract.abi : []) as AbiFunction[]
     : [];
+  const contractChain = contract
+    ? CHAINS.find((candidate) => candidate.chainName === contract.network)
+    : undefined;
 
   const readFns = abiArr.filter(
     (f) => f.type === "function" && (f.stateMutability === "view" || f.stateMutability === "pure"),
@@ -106,70 +191,121 @@ export default function IdeContractPanel({
     (f) => f.type === "function" && f.stateMutability !== "view" && f.stateMutability !== "pure",
   );
 
-  const getState = (name: string): FnState =>
-    states[name] ?? { open: false, args: {}, ethValue: "", result: null, loading: false, error: null };
+  const getState = (key: string): FnState => states[key] ?? emptyFnState();
 
-  const toggle = (name: string) =>
-    setStates((prev) => ({ ...prev, [name]: { ...getState(name), open: !getState(name).open } }));
+  const toggle = (key: string) =>
+    setStates((prev) => {
+      const current = prev[key] ?? emptyFnState();
+      return { ...prev, [key]: { ...current, open: !current.open } };
+    });
 
-  const setArg = (fn: string, arg: string, val: string) =>
-    setStates((prev) => ({ ...prev, [fn]: { ...getState(fn), args: { ...getState(fn).args, [arg]: val } } }));
+  const setArg = (key: string, argIndex: number, val: string) =>
+    setStates((prev) => {
+      const current = prev[key] ?? emptyFnState();
+      return { ...prev, [key]: { ...current, args: { ...current.args, [String(argIndex)]: val } } };
+    });
 
-  const setEthValue = (fn: string, val: string) =>
-    setStates((prev) => ({ ...prev, [fn]: { ...getState(fn), ethValue: val } }));
+  const setEthValue = (key: string, val: string) =>
+    setStates((prev) => ({ ...prev, [key]: { ...(prev[key] ?? emptyFnState()), ethValue: val } }));
 
-  const setFnState = (name: string, patch: Partial<FnState>) =>
-    setStates((prev) => ({ ...prev, [name]: { ...getState(name), ...patch } }));
+  const setFnState = (key: string, patch: Partial<FnState>) =>
+    setStates((prev) => ({ ...prev, [key]: { ...(prev[key] ?? emptyFnState()), ...patch } }));
 
   const callRead = async (fn: AbiFunction) => {
     if (!contract) return;
-    const provider = signer
-      ? signer.provider
-      : new BrowserProvider((window as unknown as { ethereum: ConstructorParameters<typeof BrowserProvider>[0] }).ethereum);
-    const c = new Contract(contract.address, contract.abi, provider);
-    const st = getState(fn.name);
-    // Coerce setiap arg ke tipe yang benar
-    const args = fn.inputs.map((inp) => coerceArg(st.args[inp.name] ?? "", inp.type));
-    setFnState(fn.name, { loading: true, error: null, result: null });
+    const key = functionKey(fn);
+    const st = getState(key);
+    setFnState(key, { loading: true, error: null, result: null });
     try {
-      const res = await c[fn.name](...args) as unknown;
-      setFnState(fn.name, { loading: false, result: formatResult(res) });
+      const chain = CHAINS.find((candidate) => candidate.chainName === contract.network);
+      if (!chain) throw new Error(`Unsupported contract network: ${contract.network}`);
+      const providers: Provider[] = [];
+      providers.push(new JsonRpcProvider(chain.rpcUrls[0], chain.chainIdDec, { staticNetwork: true }));
+      if (signer?.provider) {
+        try {
+          const signerNetwork = await signer.provider.getNetwork();
+          if (signerNetwork.chainId === BigInt(chain.chainIdDec)) providers.push(signer.provider);
+        } catch {
+          // Fall back to the injected wallet provider or the configured public RPC.
+        }
+      }
+      const win = window as unknown as {
+        ethereum?: ConstructorParameters<typeof BrowserProvider>[0];
+      };
+      if (win.ethereum) {
+        const walletProvider = new BrowserProvider(win.ethereum);
+        try {
+          const walletNetwork = await walletProvider.getNetwork();
+          if (walletNetwork.chainId === BigInt(chain.chainIdDec) && !providers.includes(walletProvider)) {
+            providers.push(walletProvider);
+          }
+        } catch {
+          // The public RPC below remains available when the wallet provider is unavailable.
+        }
+      }
+      const args = parseFunctionArgs(fn, st.args);
+
+      let lastError: unknown;
+      for (const provider of providers) {
+        try {
+          const c = new Contract(contract.address, contract.abi, provider);
+          const res = await c.getFunction(functionKey(fn))(...args) as unknown;
+          setFnState(key, { loading: false, result: formatResult(res), error: null });
+          return;
+        } catch (error: unknown) {
+          lastError = error;
+          if (!isRpcConnectionError(error)) throw error;
+        }
+      }
+      throw lastError instanceof Error ? lastError : new Error("All RPC providers failed.");
     } catch (e: unknown) {
-      const msg = (e as Error).message ?? "Error";
-      setFnState(fn.name, { loading: false, error: msg });
+      const msg = friendlyContractError(e, contract.network);
+      setFnState(key, { loading: false, error: msg });
       onLog(msg, "error", "contract");
     }
   };
 
   const callWrite = async (fn: AbiFunction) => {
     if (!contract) return;
+    const key = functionKey(fn);
     if (!signer) {
-      onLog("Hubungkan wallet untuk mengirim transaksi.", "error", "wallet");
+      const msg = "Connect a wallet before sending a transaction.";
+      setFnState(key, { loading: false, error: msg });
+      onLog(msg, "error", "wallet");
       return;
     }
-    const c = new Contract(contract.address, contract.abi, signer);
-    const st = getState(fn.name);
-    const args = fn.inputs.map((inp) => coerceArg(st.args[inp.name] ?? "", inp.type));
-    setFnState(fn.name, { loading: true, error: null, result: null });
+    const st = getState(key);
+    setFnState(key, { loading: true, error: null, result: null });
     try {
-      // Handle payable — kirim ETH/native value jika diisi
-      const overrides = fn.stateMutability === "payable" && st.ethValue
-        ? { value: parseEther(st.ethValue) }
-        : {};
-      const tx = await c[fn.name](...args, overrides) as { hash: string; wait: () => Promise<{ hash: string }> };
+      const chain = CHAINS.find((candidate) => candidate.chainName === contract.network);
+      if (!chain) throw new Error(`Unsupported contract network: ${contract.network}`);
+      const walletNetwork = await signer.provider?.getNetwork();
+      if (walletNetwork?.chainId !== BigInt(chain.chainIdDec)) {
+        throw new Error(`Switch your wallet to ${chain.chainName} before sending this transaction.`);
+      }
+      const c = new Contract(contract.address, contract.abi, signer);
+      const args = parseFunctionArgs(fn, st.args);
+      const method = c.getFunction(functionKey(fn));
+      const overrides = fn.stateMutability === "payable" && st.ethValue.trim()
+        ? { value: parseUnits(st.ethValue.trim(), chain.nativeCurrency.decimals) }
+        : undefined;
+      const tx = overrides ? await method(...args, overrides) : await method(...args);
       onLog(`Tx sent: ${tx.hash}`, "info", "contract", `${contract.explorerBase}/tx/${tx.hash}`);
       const receipt = await tx.wait();
+      if (!receipt || receipt.status !== 1) {
+        throw new Error(`Transaction ${tx.hash} was not successful.`);
+      }
       const hash = receipt?.hash ?? tx.hash;
-      setFnState(fn.name, { loading: false, result: `Tx: ${hash}` });
+      setFnState(key, { loading: false, result: `Tx: ${hash}`, error: null });
       onLog(`Tx confirmed: ${hash}`, "success", "contract", `${contract.explorerBase}/tx/${hash}`);
       // Catat ke transactions history
       setTxHistory((prev) => [
-        { fn: fn.name, hash, time: new Date().toLocaleTimeString(), explorerBase: contract.explorerBase },
+        { fn: functionKey(fn), hash, time: new Date().toLocaleTimeString(), explorerBase: contract.explorerBase },
         ...prev,
       ]);
     } catch (e: unknown) {
-      const msg = (e as Error).message ?? "Error";
-      setFnState(fn.name, { loading: false, error: msg });
+      const msg = friendlyContractError(e, contract.network);
+      setFnState(key, { loading: false, error: msg });
       onLog(msg, "error", "contract");
     }
   };
@@ -208,19 +344,21 @@ export default function IdeContractPanel({
             <div className="rounded-lg p-3 space-y-3" style={{ background: "var(--surface)", border: "1px solid var(--accent)" }}>
               <p className="text-xs font-semibold" style={{ color: "var(--accent)" }}>Constructor Arguments</p>
               <p className="text-xs" style={{ color: "var(--muted)" }}>
+                Deploy <strong>{pendingDeploy.contractName}</strong> from <span className="mono">{pendingDeploy.fileName}</span> to{" "}
+                <strong>{CHAINS.find((chain) => chain.key === pendingDeploy.chainKey)?.chainName ?? "the selected network"}</strong>.
                 Fill in all arguments then click <strong>Confirm Deploy</strong>.
               </p>
-              {pendingDeploy.constructorInputs.map((inp) => (
-                <div key={inp.name} className="space-y-1">
+              {pendingDeploy.constructorInputs.map((inp, index) => (
+                <div key={index} className="space-y-1">
                   <label className="text-xs" style={{ color: "var(--muted)" }}>
-                    {inp.name || "_"}{" "}
+                    {inp.name || `Argument ${index + 1}`}{" "}
                     <span className="mono" style={{ color: "var(--subtle)", fontSize: 10 }}>({inp.type})</span>
                   </label>
                   <input
                     type="text"
                     placeholder={inp.type}
-                    value={constructorArgs[inp.name] ?? ""}
-                    onChange={(e) => onConstructorArgChange(inp.name, e.target.value)}
+                    value={constructorArgs[String(index)] ?? ""}
+                    onChange={(e) => onConstructorArgChange(index, e.target.value)}
                     className="w-full rounded px-2 py-1.5 text-xs mono focus:outline-none"
                     style={{ background: "var(--surface-muted)", border: "1px solid var(--border)", color: "var(--ink)" }}
                   />
@@ -261,9 +399,13 @@ export default function IdeContractPanel({
                 <span className="mono text-xs" style={{ color: "var(--ink-2)" }}>
                   {contract.address.slice(0, 8)}...{contract.address.slice(-6)}
                 </span>
-                <button onClick={() => { void copyToClipboard(contract.address); }} title="Copy address" style={{ color: "var(--subtle)" }}>
-                  <Copy size={11} />
-                </button>
+                <CopyButton
+                  text={contract.address}
+                  label="Copy contract address"
+                  iconSize={11}
+                  className="rounded p-0.5 transition-colors hover:bg-[#3c3c3c]"
+                  style={{ color: "var(--subtle)" }}
+                />
                 <a href={`${contract.explorerBase}/address/${contract.address}`} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent-text)" }}>
                   <ExternalLink size={11} />
                 </a>
@@ -296,14 +438,15 @@ export default function IdeContractPanel({
               </div>
               {readFns.map((fn) => (
                 <FnAccordion
-                  key={fn.name}
+                  key={functionKey(fn)}
                   fn={fn}
-                  state={getState(fn.name)}
-                  onToggle={() => toggle(fn.name)}
-                  onArgChange={(argName, val) => setArg(fn.name, argName, val)}
+                  state={getState(functionKey(fn))}
+                  onToggle={() => toggle(functionKey(fn))}
+                  onArgChange={(argIndex, val) => setArg(functionKey(fn), argIndex, val)}
                   onEthValueChange={() => {}}
                   onCall={() => { void callRead(fn); }}
                   isRead
+                  nativeCurrencySymbol={contractChain?.nativeCurrency.symbol ?? "native"}
                 />
               ))}
             </div>
@@ -320,14 +463,15 @@ export default function IdeContractPanel({
               </div>
               {writeFns.map((fn) => (
                 <FnAccordion
-                  key={fn.name}
+                  key={functionKey(fn)}
                   fn={fn}
-                  state={getState(fn.name)}
-                  onToggle={() => toggle(fn.name)}
-                  onArgChange={(argName, val) => setArg(fn.name, argName, val)}
-                  onEthValueChange={(val) => setEthValue(fn.name, val)}
+                  state={getState(functionKey(fn))}
+                  onToggle={() => toggle(functionKey(fn))}
+                  onArgChange={(argIndex, val) => setArg(functionKey(fn), argIndex, val)}
+                  onEthValueChange={(val) => setEthValue(functionKey(fn), val)}
                   onCall={() => { void callWrite(fn); }}
                   isRead={false}
+                  nativeCurrencySymbol={contractChain?.nativeCurrency.symbol ?? "native"}
                 />
               ))}
             </div>
@@ -384,13 +528,14 @@ interface FnAccordionProps {
   fn: AbiFunction;
   state: FnState;
   onToggle: () => void;
-  onArgChange: (argName: string, val: string) => void;
+  onArgChange: (argIndex: number, val: string) => void;
   onEthValueChange: (val: string) => void;
   onCall: () => void;
   isRead: boolean;
+  nativeCurrencySymbol: string;
 }
 
-function FnAccordion({ fn, state, onToggle, onArgChange, onEthValueChange, onCall, isRead }: FnAccordionProps) {
+function FnAccordion({ fn, state, onToggle, onArgChange, onEthValueChange, onCall, isRead, nativeCurrencySymbol }: FnAccordionProps) {
   const isPayable = fn.stateMutability === "payable";
   const outputHint = fn.outputs && fn.outputs.length > 0
     ? fn.outputs.map((o) => o.type).join(", ")
@@ -404,7 +549,7 @@ function FnAccordion({ fn, state, onToggle, onArgChange, onEthValueChange, onCal
         style={{ color: "var(--ink-2)" }}
       >
         <div className="flex items-center gap-2 min-w-0">
-          <span className="mono text-xs font-medium truncate">{fn.name}</span>
+          <span className="mono text-xs font-medium truncate" title={functionKey(fn)}>{functionKey(fn)}</span>
           {outputHint && isRead && (
             <span className="mono shrink-0" style={{ fontSize: 10, color: "var(--subtle)" }}>→ {outputHint}</span>
           )}
@@ -419,8 +564,8 @@ function FnAccordion({ fn, state, onToggle, onArgChange, onEthValueChange, onCal
 
       {state.open && (
         <div className="px-3 pb-3 space-y-2" style={{ borderTop: "1px solid var(--border)" }}>
-          {fn.inputs.map((inp) => (
-            <div key={inp.name} className="space-y-1">
+          {fn.inputs.map((inp, index) => (
+            <div key={index} className="space-y-1">
               <label className="text-xs" style={{ color: "var(--muted)" }}>
                 {inp.name || "_"}{" "}
                 <span className="mono" style={{ color: "var(--subtle)", fontSize: 10 }}>({inp.type})</span>
@@ -428,8 +573,8 @@ function FnAccordion({ fn, state, onToggle, onArgChange, onEthValueChange, onCal
               <input
                 type="text"
                 placeholder={inp.type}
-                value={state.args[inp.name] ?? ""}
-                onChange={(e) => onArgChange(inp.name, e.target.value)}
+                value={state.args[String(index)] ?? ""}
+                onChange={(e) => onArgChange(index, e.target.value)}
                 className="w-full rounded px-2 py-1 text-xs mono focus:outline-none"
                 style={{ background: "var(--surface-muted)", border: "1px solid var(--border)", color: "var(--ink)" }}
               />
@@ -440,7 +585,7 @@ function FnAccordion({ fn, state, onToggle, onArgChange, onEthValueChange, onCal
           {isPayable && (
             <div className="space-y-1">
               <label className="text-xs" style={{ color: "var(--warn)" }}>
-                Value (ETH/native){" "}
+                Value ({nativeCurrencySymbol}){" "}
                 <span className="mono" style={{ fontSize: 10, color: "var(--subtle)" }}>(payable)</span>
               </label>
               <input

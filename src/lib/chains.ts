@@ -5,7 +5,7 @@ export const ARC_TESTNET: ArcChain = {
   chainIdHex: "0x4cef52",
   chainIdDec: 5042002,
   chainName: "Arc Testnet",
-  nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 6 },
+  nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 },
   rpcUrls: ["https://rpc.testnet.arc.io"],
   blockExplorerUrls: ["https://explorer.testnet.arc.io"],
   faucet: "https://faucet.circle.com",
@@ -16,7 +16,7 @@ export const ARC_MAINNET: ArcChain = {
   chainIdHex: "0x13b2",
   chainIdDec: 5042,
   chainName: "Arc Mainnet",
-  nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 6 },
+  nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 },
   rpcUrls: ["https://rpc.mainnet.arc.io"],
   blockExplorerUrls: ["https://explorer.arc.io"],
 };

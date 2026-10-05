@@ -26,23 +26,23 @@ export default function IdeTabBar({
       style={{
         background: "var(--surface-muted)",
         borderBottom: "1px solid var(--border)",
-        minHeight: 44,
+        minHeight: 36,
       }}
     >
       {/* Tabs */}
-      <div className="flex items-end flex-1 overflow-x-auto">
+      <div className="flex items-stretch flex-1 overflow-x-auto">
         {openFiles.map((name) => {
           const isActive = activeFile === name;
           return (
             <div
               key={name}
               onClick={() => onSelect(name)}
-              className="group flex items-center gap-1.5 px-3 cursor-pointer text-xs shrink-0 transition-colors self-stretch pt-1"
+              className="group flex items-center gap-1.5 px-3 cursor-pointer text-xs shrink-0 transition-colors self-stretch"
               style={{
-                background: isActive ? "var(--bg)" : "transparent",
-                borderTop: `2px solid ${isActive ? "var(--accent)" : "transparent"}`,
+                background: isActive ? "var(--bg)" : "var(--surface)",
+                borderTop: `1px solid ${isActive ? "var(--accent)" : "transparent"}`,
                 borderRight: "1px solid var(--border)",
-                color: isActive ? "var(--ink)" : "var(--subtle)",
+                color: isActive ? "var(--ink)" : "var(--muted)",
               }}
             >
               <FileCode size={12} style={{ opacity: 0.6 }} />

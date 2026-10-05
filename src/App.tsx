@@ -7,10 +7,10 @@ import IdeEditor from "./components/IdeEditor";
 import IdeLogsPanel, { type LogEntry } from "./components/IdeLogsPanel";
 import IdeContractPanel from "./components/IdeContractPanel";
 import IdeHistoryPanel, { type HistoryEntry } from "./components/IdeHistoryPanel";
-import IdeImportPanel from "./components/IdeImportPanel";
 import MainnetWarningModal from "./components/MainnetWarningModal";
-import { connectWallet, switchToChain, type ArcChain } from "./lib/wallet";
+import { connectWallet, hasWallet, switchToChain, type ArcChain } from "./lib/wallet";
 import { compileContract, deployContract, type CompileResult } from "./lib/compileAndDeploy";
+import { coerceArg, type AbiParameter } from "./lib/contractInteract";
 import { CHAINS, ARC_TESTNET } from "./lib/chains";
 import { BrowserProvider } from "ethers";
 import type { JsonRpcSigner, InterfaceAbi } from "ethers";
@@ -39,10 +39,15 @@ interface DeployRecord {
   timestamp: string;
 }
 
-const STORAGE_KEY = "arc-ide-files-v5";
+const STORAGE_KEY = "arc-ide-files-v6";
+const LEGACY_STORAGE_KEY = "arc-ide-files-v5";
 const CONTRACTS_KEY = "arc-ide-contracts-v2";
 
-const TPL_ERC20 = `// SPDX-License-Identifier: MIT
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+const _TPL_ERC20 = `// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
 /// @title ERC-20 Token
@@ -119,7 +124,7 @@ contract ERC20Token {
 }
 `;
 
-const TPL_ERC721 = `// SPDX-License-Identifier: MIT
+const _TPL_ERC721 = `// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
 /// @title ERC-721 NFT Collection
@@ -197,7 +202,7 @@ contract ERC721NFT {
 }
 `;
 
-const TPL_MULTISIG = `// SPDX-License-Identifier: MIT
+const _TPL_MULTISIG = `// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
 /// @title MultiSig Wallet
@@ -278,7 +283,7 @@ contract MultiSigWallet {
 }
 `;
 
-const TPL_VAULT = `// SPDX-License-Identifier: MIT
+const _TPL_VAULT = `// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
 /// @title Token Vault
@@ -332,7 +337,7 @@ contract TokenVault {
 }
 `;
 
-const TPL_STAKING = `// SPDX-License-Identifier: MIT
+const _TPL_STAKING = `// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
 /// @title Simple Staking
@@ -409,7 +414,7 @@ contract SimpleStaking {
 }
 `;
 
-const TPL_COUNTER = `// SPDX-License-Identifier: MIT
+const _TPL_COUNTER = `// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
 /// @title Counter — contract paling sederhana untuk test deploy pertama kali
@@ -448,7 +453,7 @@ contract Counter {
 }
 `;
 
-const TPL_FAUCET = `// SPDX-License-Identifier: MIT
+const _TPL_FAUCET = `// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
 /// @title TestFaucet — faucet native token untuk testing di testnet
@@ -513,8 +518,8 @@ contract TestFaucet {
 const TPL_HELLO = `// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-/// @title HelloArc — contract test paling minimal untuk Arc Testnet & Mainnet
-/// @notice Simpan dan baca pesan onchain. Tidak perlu gas besar.
+/// @title HelloArc — a minimal contract for Arc Testnet and Mainnet
+/// @notice Store and read an on-chain message.
 contract HelloArc {
     string public message;
     address public owner;
@@ -545,26 +550,46 @@ contract HelloArc {
 }
 `;
 
-const DEFAULT_FILES: FileEntry[] = [
-  { name: "Counter.sol", content: TPL_COUNTER },
-  { name: "HelloArc.sol", content: TPL_HELLO },
-  { name: "TestFaucet.sol", content: TPL_FAUCET },
-  { name: "ERC20Token.sol", content: TPL_ERC20 },
-  { name: "ERC721NFT.sol", content: TPL_ERC721 },
-  { name: "MultiSigWallet.sol", content: TPL_MULTISIG },
-  { name: "TokenVault.sol", content: TPL_VAULT },
-  { name: "SimpleStaking.sol", content: TPL_STAKING },
-];
+const DEFAULT_FILES: FileEntry[] = [{ name: "HelloArc.sol", content: TPL_HELLO }];
 
 function loadFiles(): FileEntry[] {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved) as FileEntry[];
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    const current = localStorage.getItem(STORAGE_KEY);
+    if (current) {
+      const parsed: unknown = JSON.parse(current);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((file): file is FileEntry =>
+          !!file &&
+          typeof file === "object" &&
+          "name" in file &&
+          typeof file.name === "string" &&
+          "content" in file &&
+          typeof file.content === "string"
+        );
+      }
+    }
+
+    const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (legacy) {
+      const parsed: unknown = JSON.parse(legacy);
+      const helloArc = Array.isArray(parsed)
+        ? parsed.find((file): file is FileEntry =>
+          !!file &&
+          typeof file === "object" &&
+          "name" in file &&
+          file.name === "HelloArc.sol" &&
+          "content" in file &&
+          typeof file.content === "string"
+        )
+        : undefined;
+      const files = helloArc ? [helloArc] : DEFAULT_FILES;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(files));
+      localStorage.removeItem(LEGACY_STORAGE_KEY);
+      return files;
     }
   } catch {
-    // ignore
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
   }
   return DEFAULT_FILES;
 }
@@ -572,6 +597,34 @@ function loadFiles(): FileEntry[] {
 interface PersistedContracts {
   byFile: Record<string, ActiveContract>;
   history: DeployRecord[];
+}
+
+function parseAbiParameter(value: unknown): AbiParameter | null {
+  if (!value || typeof value !== "object" || !("type" in value) || typeof value.type !== "string") {
+    return null;
+  }
+  const input = value as { name?: unknown; type: string; components?: unknown };
+  const components = Array.isArray(input.components)
+    ? input.components.map(parseAbiParameter).filter((item): item is AbiParameter => item !== null)
+    : undefined;
+  return {
+    name: typeof input.name === "string" ? input.name : "",
+    type: input.type,
+    ...(components ? { components } : {}),
+  };
+}
+
+function getConstructorInputs(abi: InterfaceAbi): AbiParameter[] {
+  const fragments: unknown[] = Array.isArray(abi) ? abi : [];
+  const constructor = fragments.find((item) =>
+    typeof item === "object" && item !== null && "type" in item && item.type === "constructor"
+  );
+  if (!constructor || typeof constructor !== "object" || !("inputs" in constructor) || !Array.isArray(constructor.inputs)) {
+    return [];
+  }
+  return constructor.inputs
+    .map(parseAbiParameter)
+    .filter((input): input is AbiParameter => input !== null);
 }
 
 function loadContracts(): PersistedContracts {
@@ -607,13 +660,20 @@ export default function App() {
   const [chainKey, setChainKey] = useState(ARC_TESTNET.key);
   const [compiling, setCompiling] = useState(false);
   const [deploying, setDeploying] = useState(false);
-  const [pendingDeploy, setPendingDeploy] = useState<{ abi: import("ethers").InterfaceAbi; bytecode: string; constructorInputs: { name: string; type: string }[] } | null>(null);
+  const [pendingDeploy, setPendingDeploy] = useState<{
+    contractName: string;
+    fileName: string;
+    chainKey: string;
+    abi: InterfaceAbi;
+    bytecode: string;
+    constructorInputs: AbiParameter[];
+  } | null>(null);
   const [constructorArgs, setConstructorArgs] = useState<Record<string, string>>({});
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [deployHistory, setDeployHistory] = useState<DeployRecord[]>(() => loadContracts().history);
   const [contractsByFile, setContractsByFile] = useState<Record<string, ActiveContract>>(() => loadContracts().byFile);
   const [panelOpen, setPanelOpen] = useState(true);
-  const [activePanel, setActivePanel] = useState<"files" | "run" | "history" | "import" | null>("files");
+  const [activePanel, setActivePanel] = useState<"files" | "run" | "history" | null>("files");
   const [showMainnetModal, setShowMainnetModal] = useState(false);
   const [pendingChainKey, setPendingChainKey] = useState<string | null>(null);
   const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>(() => {
@@ -623,6 +683,16 @@ export default function App() {
     } catch { /* ignore */ }
     return [];
   });
+
+  const log = useCallback((
+    text: string,
+    type: LogEntry["type"] = "info",
+    category = "info",
+    explorerUrl?: string,
+  ) => setLogs((prev) => [
+    ...prev,
+    { text, type, category, time: new Date().toLocaleTimeString(), explorerUrl },
+  ].slice(-500)), []);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(files));
@@ -636,20 +706,25 @@ export default function App() {
     localStorage.setItem("arc-ide-history-v1", JSON.stringify(historyEntries));
   }, [historyEntries]);
 
-  // Refresh signer setiap kali wallet berpindah network secara manual di MetaMask
-  const refreshSigner = useCallback(async () => {
+  // Refresh the signer whenever the wallet account or network changes.
+  const refreshSigner = useCallback(async (): Promise<JsonRpcSigner | null> => {
     const win = window as unknown as { ethereum?: { request: (a: { method: string }) => Promise<unknown> } };
-    if (!win.ethereum) return;
-    try {
-      const provider = new BrowserProvider(win.ethereum);
-      const accounts = (await provider.send("eth_accounts", [])) as string[];
-      if (accounts.length === 0) return;
-      const newSigner = await provider.getSigner();
-      setSigner(newSigner);
-      setAddress(accounts[0]);
-    } catch {
-      // wallet mungkin terkunci, biarkan saja
+    if (!win.ethereum) {
+      setSigner(null);
+      setAddress(null);
+      return null;
     }
+    const provider = new BrowserProvider(win.ethereum);
+    const accounts = (await provider.send("eth_accounts", [])) as string[];
+    if (accounts.length === 0) {
+      setSigner(null);
+      setAddress(null);
+      return null;
+    }
+    const newSigner = await provider.getSigner();
+    setSigner(newSigner);
+    setAddress(accounts[0]);
+    return newSigner;
   }, []);
 
   useEffect(() => {
@@ -662,8 +737,10 @@ export default function App() {
     if (!win.ethereum) return;
 
     const onChainChanged = () => {
-      // Chain berubah di MetaMask — refresh signer agar ikut network baru
-      void refreshSigner();
+      // Keep the app's selected target separate from a manual wallet network change.
+      void refreshSigner().catch((error: unknown) => {
+        log(`Could not refresh wallet after network change: ${errorMessage(error)}`, "error", "wallet");
+      });
     };
     const onAccountsChanged = (accs: unknown) => {
       const accounts = accs as string[];
@@ -671,7 +748,9 @@ export default function App() {
         setAddress(null);
         setSigner(null);
       } else {
-        void refreshSigner();
+        void refreshSigner().catch((error: unknown) => {
+          log(`Could not refresh the connected wallet: ${errorMessage(error)}`, "error", "wallet");
+        });
       }
     };
 
@@ -681,10 +760,7 @@ export default function App() {
       win.ethereum?.removeListener("chainChanged", onChainChanged);
       win.ethereum?.removeListener("accountsChanged", onAccountsChanged);
     };
-  }, [refreshSigner]);
-
-  const log = (text: string, type: LogEntry["type"] = "info", category = "info", explorerUrl?: string) =>
-    setLogs((prev) => [...prev, { text, type, category, time: new Date().toLocaleTimeString(), explorerUrl }]);
+  }, [refreshSigner, log]);
 
   const activeContent = files.find((f) => f.name === activeFile)?.content ?? "";
 
@@ -723,7 +799,7 @@ export default function App() {
       return exists ? prev.map((f) => (f.name === name ? { ...f, content } : f)) : [...prev, { name, content }];
     });
     openFile(name);
-    log(`File diupload: ${name}`);
+    log(`File uploaded: ${name}`);
   };
 
   const handleDownload = () => {
@@ -735,7 +811,7 @@ export default function App() {
     a.download = activeFile;
     a.click();
     URL.revokeObjectURL(url);
-    log(`File diunduh: ${activeFile}`);
+    log(`File downloaded: ${activeFile}`);
   };
 
   const handleDeleteFile = (name: string) => {
@@ -753,7 +829,7 @@ export default function App() {
       setAddress(result.address);
       log(`Wallet connected: ${result.address}`, "success", "wallet");
     } catch (e: unknown) {
-      log((e as Error).message, "error", "wallet");
+      log(errorMessage(e), "error", "wallet");
     }
   };
 
@@ -763,7 +839,7 @@ export default function App() {
     log("Wallet disconnected.", "info", "wallet");
   };
 
-  /** Load contract dari history ke Run & Debug panel */
+  /** Load a contract from history into the Run & Debug panel. */
   const handleLoadFromHistory = (entry: HistoryEntry) => {
     setContractsByFile((prev) => ({
       ...prev,
@@ -786,49 +862,11 @@ export default function App() {
     log(`Loaded ${entry.contractName} from history.`, "info", "deploy");
   };
 
-  /** Hapus entry dari history */
-  const handleDeleteHistory = (address: string) => {
-    setHistoryEntries((prev) => prev.filter((e) => e.address !== address));
-  };
-
-  /** Import contract by address + ABI */
-  const handleImportContract = (params: {
-    address: string;
-    abi: import("ethers").InterfaceAbi;
-    contractName: string;
-    network: string;
-    explorerBase: string;
-  }) => {
-    const virtualFileName = `${params.contractName}.imported.sol`;
-    setContractsByFile((prev) => ({
-      ...prev,
-      [virtualFileName]: {
-        contractName: params.contractName,
-        address: params.address,
-        txHash: "",
-        network: params.network,
-        explorerBase: params.explorerBase,
-        abi: params.abi,
-        fileName: virtualFileName,
-      },
-    }));
-    // Buat file placeholder di editor supaya tab bisa dibuka
-    if (!files.some((f) => f.name === virtualFileName)) {
-      setFiles((prev) => [
-        ...prev,
-        {
-          name: virtualFileName,
-          content: `// Imported contract: ${params.contractName}\n// Address: ${params.address}\n// Network: ${params.network}\n// ABI imported manually\n`,
-        },
-      ]);
-    }
-    if (!openFiles.includes(virtualFileName)) {
-      setOpenFiles((p) => [...p, virtualFileName]);
-    }
-    setActiveFile(virtualFileName);
-    setPanelOpen(true);
-    setActivePanel("files");
-    log(`Imported ${params.contractName} (${params.address}).`, "success", "deploy");
+  /** Remove an entry from history. */
+  const handleDeleteHistory = (network: string, address: string) => {
+    setHistoryEntries((prev) => prev.filter((entry) =>
+      entry.network !== network || entry.address.toLowerCase() !== address.toLowerCase()
+    ));
   };
 
   const handleChainChange = async (key: string) => {
@@ -842,37 +880,53 @@ export default function App() {
 
   const doChainSwitch = async (key: string) => {
     const chain = CHAINS.find((c) => c.key === key);
-    if (!chain) return;
-    setChainKey(key);
+    if (!chain) return false;
+    if (!hasWallet()) {
+      setChainKey(key);
+      log(`${chain.chainName} selected. Connect a wallet to send transactions.`, "info", "network");
+      return true;
+    }
     try {
       await switchToChain(chain);
+      setChainKey(key);
       await refreshSigner();
       log(`Switched to: ${chain.chainName}`, "success", "network");
+      return true;
     } catch (e: unknown) {
-      log((e as Error).message, "error", "network");
+      const message = `Wallet network switch failed: ${errorMessage(e)}`;
+      log(message, "error", "network");
+      return false;
     }
   };
 
-  /** Fase 1: compile dan tampilkan form constructor args kalau ada */
+  /** Phase 1: compile and show the constructor-argument form when needed. */
   const handleDeploy = async () => {
-    if (!activeFile) { log("Tidak ada file aktif.", "error", "deploy"); return; }
-    if (!signer) { log("Hubungkan wallet dulu.", "error", "wallet"); return; }
+    if (!activeFile) { log("No active file selected.", "error", "deploy"); return; }
+    const chain = CHAINS.find((c) => c.key === chainKey);
+    if (!chain) { log("The selected network is not supported.", "error", "network"); return; }
 
-    const chain = CHAINS.find((c) => c.key === chainKey) as ArcChain;
-
-    // Verifikasi / switch network
+    let deploymentSigner: JsonRpcSigner | null;
     try {
-      const network = await signer.provider?.getNetwork();
-      const walletChainId = Number(network?.chainId ?? 0);
-      if (walletChainId !== chain.chainIdDec) {
-        log(`Mencoba switch ke ${chain.chainName}...`, "info", "network");
+      deploymentSigner = await refreshSigner();
+      if (!deploymentSigner) {
+        log("Connect a wallet before deploying a contract.", "error", "wallet");
+        return;
+      }
+      let walletNetwork = await deploymentSigner.provider.getNetwork();
+      if (walletNetwork.chainId !== BigInt(chain.chainIdDec)) {
+        log(`Switching to ${chain.chainName}...`, "info", "network");
         await switchToChain(chain);
-        await refreshSigner();
-        log(`Berhasil pindah ke ${chain.chainName}`, "success", "network");
+        deploymentSigner = await refreshSigner();
+        if (!deploymentSigner) throw new Error("The wallet disconnected while switching networks.");
+        walletNetwork = await deploymentSigner.provider.getNetwork();
+        if (walletNetwork.chainId !== BigInt(chain.chainIdDec)) {
+          throw new Error(`The wallet is not connected to ${chain.chainName}.`);
+        }
+        log(`Switched to ${chain.chainName}.`, "success", "network");
       }
     } catch (e: unknown) {
-      const msg = (e as Error).message ?? "";
-      if (!msg.includes("provider")) { log(`Gagal switch network: ${msg}`, "error", "network"); return; }
+      log(`Could not prepare the wallet for deployment: ${errorMessage(e)}`, "error", "network");
+      return;
     }
 
     setCompiling(true);
@@ -883,52 +937,78 @@ export default function App() {
       compiled.warnings.forEach((w) => log(w, "warn", "compile"));
       log(`Compiled: ${compiled.contractName}`, "success", "compile");
     } catch (e: unknown) {
-      log(`Compile failed: ${(e as Error).message}`, "error", "compile");
-      setCompiling(false);
+      log(`Compile failed: ${errorMessage(e)}`, "error", "compile");
       return;
     } finally {
       setCompiling(false);
     }
 
-    // Cek apakah constructor punya inputs
-    type AbiItem = { type: string; inputs?: { name: string; type: string }[] };
-    const abiArr = compiled.abi as AbiItem[];
-    const ctorInputs = abiArr.find((x) => x.type === "constructor")?.inputs ?? [];
+    const ctorInputs = getConstructorInputs(compiled.abi);
 
     if (ctorInputs.length > 0) {
-      // Ada constructor args — tampilkan form, tunggu user isi lalu klik "Confirm Deploy"
-      setPendingDeploy({ abi: compiled.abi, bytecode: compiled.bytecode, constructorInputs: ctorInputs });
+      setPendingDeploy({
+        contractName: compiled.contractName,
+        fileName: activeFile,
+        chainKey: chain.key,
+        abi: compiled.abi,
+        bytecode: compiled.bytecode,
+        constructorInputs: ctorInputs,
+      });
       setConstructorArgs({});
       setPanelOpen(true);
       log(`Contract has ${ctorInputs.length} constructor argument(s). Fill in the form in the Run & Debug panel then click "Confirm Deploy".`, "info", "deploy");
       return;
     }
 
-    // Tidak ada constructor args — langsung deploy
-    await executeDeploy(compiled.abi, compiled.bytecode, compiled.contractName, [], chain);
+    await executeDeploy(compiled.abi, compiled.bytecode, compiled.contractName, [], chain, activeFile, deploymentSigner);
   };
 
-  /** Fase 2: kirim transaksi deploy setelah args diisi */
+  /** Phase 2: deploy after validating the constructor arguments. */
   const handleConfirmDeploy = async () => {
-    if (!pendingDeploy || !signer || !activeFile) return;
-    const chain = CHAINS.find((c) => c.key === chainKey) as ArcChain;
-    const args = pendingDeploy.constructorInputs.map((inp) => {
-      const raw = constructorArgs[inp.name] ?? "";
-      const t = inp.type.toLowerCase();
-      if (t === "bool") return raw === "true" || raw === "1";
-      if (t.startsWith("uint") || t.startsWith("int")) return raw.trim() === "" ? 0n : BigInt(raw.trim());
-      if (t.includes("[]")) { try { return JSON.parse(raw) as unknown; } catch { return raw.split(",").map((v) => v.trim()); } }
-      return raw;
+    if (!pendingDeploy) return;
+    const chain = CHAINS.find((c) => c.key === pendingDeploy.chainKey);
+    if (!chain) { log("The selected network is not supported.", "error", "network"); return; }
+
+    let args: unknown[];
+    try {
+      args = pendingDeploy.constructorInputs.map((input, index) =>
+        coerceArg(constructorArgs[String(index)] ?? "", input.type, input.components)
+      );
+    } catch (error: unknown) {
+      log(`Invalid constructor argument: ${errorMessage(error)}`, "error", "deploy");
+      return;
+    }
+
+    const signerForDeploy = await refreshSigner().catch((error: unknown) => {
+      log(`Could not refresh the connected wallet: ${errorMessage(error)}`, "error", "wallet");
+      return null;
     });
-    const compiled = pendingDeploy;
+    if (!signerForDeploy) {
+      log("Connect a wallet before deploying a contract.", "error", "wallet");
+      return;
+    }
+    const walletNetwork = await signerForDeploy.provider.getNetwork().catch((error: unknown) => {
+      log(`Could not read the wallet network: ${errorMessage(error)}`, "error", "network");
+      return null;
+    });
+    if (!walletNetwork || walletNetwork.chainId !== BigInt(chain.chainIdDec)) {
+      log(`Switch your wallet to ${chain.chainName} before confirming deployment.`, "error", "network");
+      return;
+    }
 
-    // Dapatkan nama contract dari ABI — fallback ke nama file
-    type AbiItem = { type: string; name?: string };
-    const abiArr = compiled.abi as AbiItem[];
-    const ctorName = abiArr.find((x) => x.type === "constructor")?.name ?? activeFile.replace(".sol", "");
-
-    setPendingDeploy(null);
-    await executeDeploy(compiled.abi, compiled.bytecode, ctorName, args, chain);
+    const succeeded = await executeDeploy(
+      pendingDeploy.abi,
+      pendingDeploy.bytecode,
+      pendingDeploy.contractName,
+      args,
+      chain,
+      pendingDeploy.fileName,
+      signerForDeploy,
+    );
+    if (succeeded) {
+      setPendingDeploy(null);
+      setConstructorArgs({});
+    }
   };
 
   const executeDeploy = async (
@@ -937,30 +1017,58 @@ export default function App() {
     contractName: string,
     args: unknown[],
     chain: ArcChain,
-  ) => {
-    if (!signer || !activeFile) return;
+    fileName: string,
+    deploymentSigner: JsonRpcSigner | null,
+  ): Promise<boolean> => {
+    if (!deploymentSigner || !fileName) return false;
     setDeploying(true);
     try {
-      log("Mengirim transaksi deploy ke wallet...", "info", "deploy");
-      const { address: contractAddress, txHash } = await deployContract({ abi, bytecode, signer, constructorArgs: args });
+      const walletNetwork = await deploymentSigner.provider.getNetwork();
+      if (walletNetwork.chainId !== BigInt(chain.chainIdDec)) {
+        throw new Error(`Switch your wallet to ${chain.chainName} before deploying.`);
+      }
+      log("Sending deployment transaction to wallet...", "info", "deploy");
+      const { address: contractAddress, txHash } = await deployContract({
+        abi,
+        bytecode,
+        signer: deploymentSigner,
+        constructorArgs: args,
+      });
+      if (!txHash) throw new Error("Deployment was mined without a transaction hash.");
       const explorerBase = chain.blockExplorerUrls[0];
       const explorerUrl = `${explorerBase}/tx/${txHash}`;
       log(`Deployed: ${contractAddress}`, "success", "deploy", explorerUrl);
       log(`Tx: ${txHash}`, "info", "deploy", explorerUrl);
 
-      setDeployHistory((prev) => [{ contractName, address: contractAddress, txHash, network: chain.chainName, explorerBase, timestamp: new Date().toLocaleTimeString() }, ...prev]);
+      setDeployHistory((prev) => [
+        {
+          contractName,
+          address: contractAddress,
+          txHash,
+          network: chain.chainName,
+          explorerBase,
+          timestamp: new Date().toLocaleTimeString(),
+        },
+        ...prev.filter((entry) =>
+          entry.network !== chain.chainName || entry.address.toLowerCase() !== contractAddress.toLowerCase()
+        ),
+      ]);
       setContractsByFile((prev) => ({
         ...prev,
-        [activeFile]: { contractName, address: contractAddress, txHash, network: chain.chainName, explorerBase, abi, fileName: activeFile },
+        [fileName]: { contractName, address: contractAddress, txHash, network: chain.chainName, explorerBase, abi, fileName },
       }));
       // Tambah ke history entries permanen
       setHistoryEntries((prev) => [
-        { contractName, fileName: activeFile, address: contractAddress, txHash, network: chain.chainName, explorerBase, abi, deployedAt: new Date().toISOString() },
-        ...prev.filter((e) => e.address !== contractAddress),
+        { contractName, fileName, address: contractAddress, txHash, network: chain.chainName, explorerBase, abi, deployedAt: new Date().toISOString() },
+        ...prev.filter((entry) =>
+          entry.network !== chain.chainName || entry.address.toLowerCase() !== contractAddress.toLowerCase()
+        ),
       ]);
       setPanelOpen(true);
+      return true;
     } catch (e: unknown) {
-      log(`Deploy failed: ${(e as Error).message}`, "error", "deploy");
+      log(`Deploy failed: ${errorMessage(e)}`, "error", "deploy");
+      return false;
     } finally {
       setDeploying(false);
     }
@@ -974,10 +1082,12 @@ export default function App() {
       {/* Mainnet warning modal */}
       {showMainnetModal && (
         <MainnetWarningModal
-          onConfirm={() => {
+          onConfirm={async () => {
+            const switched = pendingChainKey ? await doChainSwitch(pendingChainKey) : false;
+            if (!switched) return false;
             setShowMainnetModal(false);
-            if (pendingChainKey) void doChainSwitch(pendingChainKey);
             setPendingChainKey(null);
+            return true;
           }}
           onCancel={() => {
             setShowMainnetModal(false);
@@ -997,45 +1107,31 @@ export default function App() {
 
       {/* Main layout */}
       <div className="flex flex-1 min-h-0">
-        {/* Activity bar — icon-only kiri */}
-        <IdeActivityBar
-          activePanel={activePanel}
-          onSelect={setActivePanel}
-        />
+        <IdeActivityBar activePanel={activePanel} onSelect={setActivePanel} />
 
-        {/* File panel */}
-        {activePanel === "files" && (
-          <IdeFilePanel
-            files={files}
-            activeFile={activeFile}
-            onSelect={openFile}
-            onNewFile={handleNewFile}
-            onUpload={handleUpload}
-            onDownload={handleDownload}
-            onDelete={handleDeleteFile}
-          />
-        )}
-
-        {/* Contract History panel */}
-        {activePanel === "history" && (
+        {activePanel === "history" ? (
           <IdeHistoryPanel
             history={historyEntries}
             onLoad={handleLoadFromHistory}
             onDelete={handleDeleteHistory}
           />
-        )}
+        ) : (
+          <>
+            {/* File panel */}
+            {activePanel === "files" && (
+              <IdeFilePanel
+                files={files}
+                activeFile={activeFile}
+                onSelect={openFile}
+                onNewFile={handleNewFile}
+                onUpload={handleUpload}
+                onDownload={handleDownload}
+                onDelete={handleDeleteFile}
+              />
+            )}
 
-        {/* Import Contract panel */}
-        {activePanel === "import" && (
-          <IdeImportPanel
-            onImport={handleImportContract}
-            selectedNetwork={CHAINS.find((c) => c.key === chainKey)?.chainName ?? chainKey}
-            explorerBase={CHAINS.find((c) => c.key === chainKey)?.blockExplorerUrls[0] ?? ""}
-          />
-        )}
-
-        {/* Editor area */}
-        <div className="flex flex-col flex-1 min-w-0" style={{ background: "var(--bg)" }}>
+            {/* Editor area */}
+            <div className="flex flex-col flex-1 min-w-0" style={{ background: "var(--bg)" }}>
           {/* Tabs */}
           <IdeTabBar
             openFiles={openFiles}
@@ -1066,24 +1162,37 @@ export default function App() {
 
           {/* Logs */}
           <IdeLogsPanel logs={logs} onClear={() => setLogs([])} />
-        </div>
+            </div>
 
-        {/* Run & Debug panel kanan — hanya muncul setelah deploy berhasil */}
-        {panelOpen && activeFile && (contractsByFile[activeFile] || pendingDeploy) && (
-          <IdeContractPanel
-            contract={activeFile ? (contractsByFile[activeFile] ?? null) : null}
-            signer={signer}
-            onLog={log}
-            onClose={() => setPanelOpen(false)}
-            onDeploy={handleDeploy}
-            onConfirmDeploy={handleConfirmDeploy}
-            deploying={deploying}
-            compiling={compiling}
-            pendingDeploy={pendingDeploy}
-            constructorArgs={constructorArgs}
-            onConstructorArgChange={(name, val) => setConstructorArgs((p) => ({ ...p, [name]: val }))}
-          />
+            {/* Run & Debug panel kanan — hanya muncul setelah deploy berhasil */}
+            {panelOpen && activeFile && (contractsByFile[activeFile] || pendingDeploy) && (
+              <IdeContractPanel
+                contract={activeFile ? (contractsByFile[activeFile] ?? null) : null}
+                signer={signer}
+                onLog={log}
+                onClose={() => setPanelOpen(false)}
+                onDeploy={handleDeploy}
+                onConfirmDeploy={handleConfirmDeploy}
+                deploying={deploying}
+                compiling={compiling}
+                pendingDeploy={pendingDeploy}
+                constructorArgs={constructorArgs}
+                onConstructorArgChange={(name, val) => setConstructorArgs((p) => ({ ...p, [name]: val }))}
+              />
+            )}
+          </>
         )}
+      </div>
+      <div
+        className="flex items-center justify-between px-2 shrink-0"
+        style={{ height: 22, background: "#007acc", color: "#fff", fontSize: 11 }}
+      >
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="font-medium">ArcIDE</span>
+          <span>{CHAINS.find((chain) => chain.key === chainKey)?.chainName ?? chainKey}</span>
+          <span>{address ? "Wallet connected" : "No wallet connected"}</span>
+        </div>
+        <span className="mono">{activeFile?.endsWith(".sol") ? "Solidity" : activeFile?.split(".").pop() ?? "Ready"}</span>
       </div>
     </div>
   );

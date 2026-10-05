@@ -14,7 +14,7 @@ interface Props {
   onClear: () => void;
 }
 
-const FILTERS = ["All", "Compile", "Deploy", "Wallet", "Network"] as const;
+const FILTERS = ["All", "Compile", "Deploy", "Wallet", "Network", "Contract", "Info"] as const;
 type Filter = typeof FILTERS[number];
 
 const TYPE_COLORS: Record<LogEntry["type"], string> = {
@@ -25,14 +25,15 @@ const TYPE_COLORS: Record<LogEntry["type"], string> = {
 };
 
 const TYPE_BG: Record<LogEntry["type"], string> = {
-  info: "rgba(100,116,139,0.08)",
-  success: "rgba(16,185,129,0.08)",
-  warn: "rgba(245,158,11,0.08)",
-  error: "rgba(239,68,68,0.08)",
+  info: "rgba(156,163,175,0.12)",
+  success: "rgba(78,201,176,0.12)",
+  warn: "rgba(204,167,0,0.14)",
+  error: "rgba(244,135,113,0.12)",
 };
 
 export default function IdeLogsPanel({ logs, onClear }: Props) {
   const [filter, setFilter] = useState<Filter>("All");
+  const [search, setSearch] = useState("");
   const [height, setHeight] = useState(160);
   const dragging = useRef(false);
   const startY = useRef(0);
@@ -56,9 +57,18 @@ export default function IdeLogsPanel({ logs, onClear }: Props) {
     window.addEventListener("mouseup", onUp);
   }, [height]);
 
-  const visible = filter === "All"
-    ? logs
-    : logs.filter((l) => l.category.toLowerCase() === filter.toLowerCase());
+  const visible = logs.filter((log) => {
+    const matchesFilter = filter === "All" || log.category.toLowerCase() === filter.toLowerCase();
+    const query = search.trim().toLowerCase();
+    const matchesSearch = !query || [
+      log.text,
+      log.category,
+      log.type,
+      log.time,
+      log.explorerUrl ?? "",
+    ].some((value) => value.toLowerCase().includes(query));
+    return matchesFilter && matchesSearch;
+  });
 
   return (
     <div
@@ -87,12 +97,15 @@ export default function IdeLogsPanel({ logs, onClear }: Props) {
       >
         <span className="text-xs font-semibold" style={{ color: "var(--muted)" }}>Logs</span>
 
-        <div
-          className="flex items-center px-2 rounded"
-          style={{ background: "var(--surface-strong)", border: "1px solid var(--border)", height: 22, minWidth: 120 }}
-        >
-          <span style={{ color: "var(--subtle)", fontSize: 10 }}>Filter by hash, method, etc.</span>
-        </div>
+        <input
+          type="search"
+          aria-label="Search logs"
+          placeholder="Search logs..."
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          className="rounded px-2 text-xs outline-none"
+          style={{ background: "var(--surface-strong)", border: "1px solid var(--border)", height: 24, minWidth: 160, color: "var(--ink)" }}
+        />
 
         <div className="flex items-center gap-1">
           {FILTERS.map((f) => (
@@ -113,7 +126,7 @@ export default function IdeLogsPanel({ logs, onClear }: Props) {
         </div>
 
         <div className="flex items-center gap-1 ml-auto">
-          {(["info", "success", "error"] as const).map((t) => (
+          {(["info", "success", "warn", "error"] as const).map((t) => (
             <span
               key={t}
               className="px-2 py-0.5 rounded text-xs capitalize"
@@ -122,7 +135,7 @@ export default function IdeLogsPanel({ logs, onClear }: Props) {
               {t}
             </span>
           ))}
-          <button onClick={onClear} title="Clear logs" className="p-1 rounded ml-1 transition-colors hover:bg-slate-100" style={{ color: "var(--subtle)" }}>
+          <button onClick={onClear} title="Clear logs" className="p-1 rounded ml-1 transition-colors hover:bg-[#3c3c3c]" style={{ color: "var(--subtle)" }}>
             <Trash2 size={12} />
           </button>
         </div>
@@ -131,7 +144,9 @@ export default function IdeLogsPanel({ logs, onClear }: Props) {
       {/* Log entries */}
       <div className="flex-1 overflow-y-auto px-3 py-1 space-y-0.5">
         {visible.length === 0 && (
-          <p className="text-xs py-3 text-center" style={{ color: "var(--subtle)" }}>No logs found.</p>
+          <p className="text-xs py-3 text-center" style={{ color: "var(--subtle)" }}>
+            {logs.length === 0 ? "No logs yet." : "No logs match the current filters."}
+          </p>
         )}
         {visible.map((l, i) => (
           <div key={i} className="flex items-start gap-2 py-0.5">

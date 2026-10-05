@@ -8,97 +8,105 @@ interface Props {
 }
 
 const registerSolidity = (monaco: typeof monacoEditor) => {
-  // Only register once
-  if (monaco.languages.getLanguages().some((l: { id: string }) => l.id === "solidity")) return;
+  if (!monaco.languages.getLanguages().some((language: { id: string }) => language.id === "solidity")) {
+    monaco.languages.register({ id: "solidity", extensions: [".sol"], aliases: ["Solidity", "sol"] });
 
-  monaco.languages.register({ id: "solidity", extensions: [".sol"], aliases: ["Solidity", "sol"] });
+    monaco.languages.setMonarchTokensProvider("solidity", {
+      keywords: [
+        "pragma","solidity","import","contract","interface","library","is","using","for",
+        "struct","enum","event","error","modifier","function","constructor","fallback","receive",
+        "returns","return","if","else","for","while","do","break","continue","try","catch","revert",
+        "emit","new","delete","assembly","unchecked","override","virtual","abstract","internal",
+        "external","public","private","pure","view","payable","nonpayable","immutable","constant",
+        "indexed","anonymous","memory","storage","calldata","mapping","tuple",
+      ],
+      typeKeywords: [
+        "address","bool","string","bytes","bytes1","bytes2","bytes4","bytes8","bytes16","bytes32",
+        "int","int8","int16","int32","int64","int128","int256",
+        "uint","uint8","uint16","uint32","uint64","uint128","uint256",
+      ],
+      constants: ["true", "false"],
+      globals: ["msg", "tx", "block", "abi", "this", "super"],
+      operators: [
+        "=","==","!=","<","<=",">",">=","&&","||","!","&","|","^","~","<<",">>",
+        "+","-","*","/","%","**","++","--","+=","-=","*=","/=","%=","&=","|=","^=",
+        "<<=",">>=","?",":",";",",",".",
+      ],
+      symbols: /[=><!~?:&|+\-*/^%]+/,
+      escapes: /\\(?:[abfnrtv\\"']|x[0-9A-Fa-f]{1,4}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})/,
+      tokenizer: {
+        root: [
+          [/[a-zA-Z_$][\w$]*(?=[ \t]*\()/, {
+            cases: {
+              "@typeKeywords": "keyword.type",
+              "@keywords": "keyword",
+              "@default": "function",
+            },
+          }],
+          [/[a-zA-Z_$][\w$]*/, {
+            cases: {
+              "@typeKeywords": "keyword.type",
+              "@keywords": "keyword",
+              "@constants": "constant",
+              "@globals": "variable.predefined",
+              "@default": "identifier",
+            },
+          }],
+          { include: "@whitespace" },
+          [/[{}()[\]]/, "@brackets"],
+          [/[<>](?!@symbols)/, "@brackets"],
+          [/@symbols/, {
+            cases: {
+              "@operators": "operator",
+              "@default": "",
+            },
+          }],
+          [/0x[0-9a-fA-F]+/, "number.hex"],
+          [/\d+(\.\d+)?([eE][-+]?\d+)?/, "number"],
+          [/[;,.]/, "delimiter"],
+          [/"([^"\\]|\\.)*$/, "string.invalid"],
+          [/"/, { token: "string.quote", bracket: "@open", next: "@string_double" }],
+          [/'([^'\\]|\\.)*$/, "string.invalid"],
+          [/'/, { token: "string.quote", bracket: "@open", next: "@string_single" }],
+        ],
+        string_double: [
+          [/[^\\"]+/, "string"],
+          [/@escapes/, "string.escape"],
+          [/\\./, "string.escape.invalid"],
+          [/"/, { token: "string.quote", bracket: "@close", next: "@pop" }],
+        ],
+        string_single: [
+          [/[^\\']+/, "string"],
+          [/@escapes/, "string.escape"],
+          [/\\./, "string.escape.invalid"],
+          [/'/, { token: "string.quote", bracket: "@close", next: "@pop" }],
+        ],
+        whitespace: [
+          [/[ \t\r\n]+/, "white"],
+          [/\/\*/, "comment", "@comment"],
+          [/\/\/.*$/, "comment"],
+        ],
+        comment: [
+          [/[^/*]+/, "comment"],
+          [/\/\*/, "comment", "@push"],
+          [/\*\//, "comment", "@pop"],
+          [/[/*]/, "comment"],
+        ],
+      },
+    });
+  }
 
-  monaco.languages.setMonarchTokensProvider("solidity", {
-    keywords: [
-      "pragma","solidity","import","contract","interface","library","is","using","for",
-      "struct","enum","event","error","modifier","function","constructor","fallback","receive",
-      "returns","return","if","else","for","while","do","break","continue","try","catch","revert",
-      "emit","new","delete","assembly","unchecked","override","virtual","abstract","internal",
-      "external","public","private","pure","view","payable","nonpayable","immutable","constant",
-      "indexed","anonymous","memory","storage","calldata","mapping","tuple",
-    ],
-    typeKeywords: [
-      "address","bool","string","bytes","bytes1","bytes2","bytes4","bytes8","bytes16","bytes32",
-      "int","int8","int16","int32","int64","int128","int256",
-      "uint","uint8","uint16","uint32","uint64","uint128","uint256",
-    ],
-    operators: [
-      "=","==","!=","<","<=",">",">=","&&","||","!","&","|","^","~","<<",">>",
-      "+","-","*","/","%","**","++","--","+=","-=","*=","/=","%=","&=","|=","^=",
-      "<<=",">>=","?",":",";",",",".",
-    ],
-    symbols: /[=><!~?:&|+\-*\/\^%]+/,
-    escapes: /\\(?:[abfnrtv\\"']|x[0-9A-Fa-f]{1,4}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})/,
-    tokenizer: {
-      root: [
-        // Identifiers & keywords
-        [/[a-zA-Z_$][\w$]*/, {
-          cases: {
-            "@typeKeywords": "keyword.type",
-            "@keywords": "keyword",
-            "@default": "identifier",
-          },
-        }],
-        { include: "@whitespace" },
-        // Delimiters and operators
-        [/[{}()[\]]/, "@brackets"],
-        [/[<>](?!@symbols)/, "@brackets"],
-        [/@symbols/, {
-          cases: {
-            "@operators": "operator",
-            "@default": "",
-          },
-        }],
-        // Numbers
-        [/0x[0-9a-fA-F]+/, "number.hex"],
-        [/\d+(\.\d+)?([eE][-+]?\d+)?/, "number"],
-        // Delimiter
-        [/[;,.]/, "delimiter"],
-        // Strings
-        [/"([^"\\]|\\.)*$/, "string.invalid"],
-        [/"/, { token: "string.quote", bracket: "@open", next: "@string_double" }],
-        [/'([^'\\]|\\.)*$/, "string.invalid"],
-        [/'/, { token: "string.quote", bracket: "@open", next: "@string_single" }],
-      ],
-      string_double: [
-        [/[^\\"]+/, "string"],
-        [/@escapes/, "string.escape"],
-        [/\\./, "string.escape.invalid"],
-        [/"/, { token: "string.quote", bracket: "@close", next: "@pop" }],
-      ],
-      string_single: [
-        [/[^\\']+/, "string"],
-        [/@escapes/, "string.escape"],
-        [/\\./, "string.escape.invalid"],
-        [/'/, { token: "string.quote", bracket: "@close", next: "@pop" }],
-      ],
-      whitespace: [
-        [/[ \t\r\n]+/, "white"],
-        [/\/\*/, "comment", "@comment"],
-        [/\/\/.*$/, "comment"],
-      ],
-      comment: [
-        [/[^/*]+/, "comment"],
-        [/\/\*/, "comment", "@push"],
-        [/\*\//, "comment", "@pop"],
-        [/[/*]/, "comment"],
-      ],
-    },
-  });
-
-  // VS Code Dark+ inspired theme for Solidity
   monaco.editor.defineTheme("solidity-dark", {
     base: "vs-dark",
     inherit: true,
     rules: [
-      { token: "keyword",        foreground: "569CD6", fontStyle: "bold" },
+      { token: "keyword",        foreground: "569CD6" },
       { token: "keyword.type",   foreground: "4EC9B0" },
+      { token: "type.identifier",foreground: "4EC9B0" },
+      { token: "function",       foreground: "DCDCAA" },
       { token: "identifier",     foreground: "9CDCFE" },
+      { token: "variable.predefined", foreground: "9CDCFE" },
+      { token: "constant",       foreground: "569CD6" },
       { token: "number",         foreground: "B5CEA8" },
       { token: "number.hex",     foreground: "B5CEA8" },
       { token: "string",         foreground: "CE9178" },
@@ -130,7 +138,7 @@ export default function IdeEditor({ value, onChange, fileName }: Props) {
   const ext = fileName?.split(".").pop() ?? "sol";
   const isSolidity = ext === "sol";
   const language = isSolidity ? "solidity" : ext === "json" ? "json" : "plaintext";
-  const theme = isSolidity ? "solidity-dark" : "vs";
+  const theme = isSolidity ? "solidity-dark" : "vs-dark";
 
   return (
     <Editor

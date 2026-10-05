@@ -13,7 +13,7 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: "4mb" }));
 
-/** Resolve import paths untuk solc — support @openzeppelin dan path relatif */
+/** Resolve Solidity imports from node_modules or the project root. */
 function findImports(importPath) {
   // Coba langsung dari node_modules
   const candidates = [
@@ -25,16 +25,21 @@ function findImports(importPath) {
       try {
         return { contents: fs.readFileSync(candidate, "utf8") };
       } catch {
-        return { error: `Tidak bisa baca: ${candidate}` };
+        return { error: `Unable to read import: ${candidate}` };
       }
     }
   }
-  return { error: `Import tidak ditemukan: ${importPath}` };
+  return { error: `Import not found: ${importPath}` };
 }
 
 app.post("/compile", (req, res) => {
-  const { fileName = "Contract.sol", source } = req.body;
-  if (!source) return res.status(400).json({ error: "source kosong" });
+  const { fileName = "Contract.sol", source } = req.body ?? {};
+  if (typeof source !== "string" || !source.trim()) {
+    return res.status(400).json({ error: "Solidity source must be a non-empty string." });
+  }
+  if (typeof fileName !== "string" || !fileName.trim() || fileName.length > 255) {
+    return res.status(400).json({ error: "fileName must be a non-empty string no longer than 255 characters." });
+  }
 
   const input = {
     language: "Solidity",
@@ -49,7 +54,11 @@ app.post("/compile", (req, res) => {
   try {
     output = JSON.parse(solc.compile(JSON.stringify(input), { import: findImports }));
   } catch (e) {
-    return res.status(500).json({ error: String(e) });
+    console.error("Solidity compiler failed:", e);
+    return res.status(500).json({
+      error: "The Solidity compiler could not process this request.",
+      details: e instanceof Error ? e.message : String(e),
+    });
   }
 
   const errors = (output.errors || []).filter((e) => e.severity === "error");
@@ -74,7 +83,7 @@ app.post("/compile", (req, res) => {
       if (contractName) break;
     }
     if (!contractName || !compiled) {
-      return res.status(400).json({ error: "Tidak ada contract yang berhasil di-compile." });
+      return res.status(400).json({ error: "No deployable contract was produced by the compiler." });
     }
     return res.json({
       contractName,
@@ -84,8 +93,13 @@ app.post("/compile", (req, res) => {
     });
   }
 
-  const contractName = Object.keys(contracts)[0];
-  const compiled = contracts[contractName];
+  const deployableContract = Object.entries(contracts).find(
+    ([, contract]) => contract.evm?.bytecode?.object
+  );
+  if (!deployableContract) {
+    return res.status(400).json({ error: "This file does not contain a deployable contract." });
+  }
+  const [contractName, compiled] = deployableContract;
 
   res.json({
     contractName,
@@ -97,5 +111,23 @@ app.post("/compile", (req, res) => {
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
-const PORT = 3001;
-app.listen(PORT, () => console.log(`Compile server berjalan di http://localhost:${PORT}`));
+app.use((err, _req, res, _next) => {
+  console.error("Compile server request failed:", err);
+  if (res.headersSent) return;
+  const status = Number.isInteger(err.status) && err.status >= 400 && err.status < 600 ? err.status : 500;
+  const isBodyParserError = err.type === "entity.parse.failed" || err.type === "entity.too.large";
+  const message = isBodyParserError
+    ? status === 413
+      ? "Request body exceeds the 4 MB compile server limit."
+      : "Request body is not valid JSON."
+    : status >= 500
+      ? "Unexpected compile server error."
+      : "Compile request was rejected.";
+  res.status(status).json({
+    error: message,
+    ...(err instanceof Error && !isBodyParserError ? { details: err.message } : {}),
+  });
+});
+
+const PORT = Number(process.env.PORT) || 3001;
+app.listen(PORT, () => console.log(`Compile server listening on http://localhost:${PORT}`));

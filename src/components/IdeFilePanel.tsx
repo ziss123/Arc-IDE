@@ -88,15 +88,15 @@ export default function IdeFilePanel({ files, activeFile, onSelect, onNewFile, o
             <button
               title="New file"
               onClick={() => { setShowNewInput(true); setNewFileName(""); setConfirmDelete(null); }}
-              className="p-1 rounded transition-colors hover:bg-slate-100"
+              className="p-1 rounded transition-colors hover:bg-[#3c3c3c]"
               style={{ color: "var(--subtle)" }}
             >
               <FilePlus size={13} />
             </button>
-            <button title="Upload .sol file" onClick={handleUploadClick} className="p-1 rounded transition-colors hover:bg-slate-100" style={{ color: "var(--subtle)" }}>
+            <button title="Upload .sol file" onClick={handleUploadClick} className="p-1 rounded transition-colors hover:bg-[#3c3c3c]" style={{ color: "var(--subtle)" }}>
               <Upload size={13} />
             </button>
-            <button title="Download active file" onClick={onDownload} className="p-1 rounded transition-colors hover:bg-slate-100" style={{ color: "var(--subtle)" }}>
+            <button title="Download active file" onClick={onDownload} className="p-1 rounded transition-colors hover:bg-[#3c3c3c]" style={{ color: "var(--subtle)" }}>
               <Download size={13} />
             </button>
             <input ref={fileInputRef} type="file" accept=".sol" onChange={handleFileChosen} className="hidden" />
@@ -182,7 +182,7 @@ export default function IdeFilePanel({ files, activeFile, onSelect, onNewFile, o
                 {isDeleting && (
                   <div
                     className="mx-2 mb-1 px-2 py-2 rounded text-xs space-y-2"
-                    style={{ background: "var(--surface)", border: "1px solid #fecaca" }}
+                    style={{ background: "var(--surface)", border: "1px solid var(--border-strong)" }}
                   >
                     <p style={{ color: "var(--ink-2)" }}>
                       Delete <span className="mono font-semibold">{f.name}</span>?
@@ -191,7 +191,7 @@ export default function IdeFilePanel({ files, activeFile, onSelect, onNewFile, o
                       <button
                         onClick={() => { onDelete(f.name); setConfirmDelete(null); }}
                         className="flex-1 py-1 rounded text-xs font-medium"
-                        style={{ background: "#ef4444", color: "#fff" }}
+                        style={{ background: "var(--danger)", color: "#1e1e1e" }}
                       >
                         Delete
                       </button>

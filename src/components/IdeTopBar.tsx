@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
-import { ChevronDown, Wallet, AlertTriangle, LogOut, Copy, ExternalLink } from "lucide-react";
+import { ChevronDown, Wallet, AlertTriangle, LogOut, ExternalLink } from "lucide-react";
 import { CHAINS } from "../lib/chains";
+import CopyButton from "./CopyButton";
 
 interface Props {
   address: string | null;
@@ -31,12 +32,12 @@ export default function IdeTopBar({ address, onConnect, onDisconnect, selectedCh
   return (
     <div
       className="flex items-center justify-between px-4 shrink-0"
-      style={{ height: 52, background: "var(--surface-muted)", borderBottom: "1px solid var(--border)" }}
+      style={{ height: 40, background: "var(--surface)", borderBottom: "1px solid var(--border)" }}
     >
       {/* Left: ArcIDE wordmark */}
       <span className="select-none flex items-baseline gap-0" style={{ letterSpacing: "-0.02em" }}>
-        <span style={{ fontSize: 18, fontWeight: 600, fontFamily: "'Space Grotesk', sans-serif", color: "var(--ink)" }}>Arc</span>
-        <span style={{ fontSize: 18, fontWeight: 300, fontFamily: "'Space Grotesk', sans-serif", color: "var(--ink-2)" }}>IDE</span>
+        <span style={{ fontSize: 16, fontWeight: 600, fontFamily: "'Space Grotesk', sans-serif", color: "var(--ink)" }}>Arc</span>
+        <span style={{ fontSize: 16, fontWeight: 300, fontFamily: "'Space Grotesk', sans-serif", color: "var(--ink-2)" }}>IDE</span>
       </span>
 
       {/* Right: wallet + chain */}
@@ -96,20 +97,19 @@ export default function IdeTopBar({ address, onConnect, onDisconnect, selectedCh
                 </div>
 
                 {/* Actions */}
-                <button
-                  onClick={() => { void navigator.clipboard.writeText(address); setWalletMenuOpen(false); }}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors hover:bg-slate-50"
+                <CopyButton
+                  text={address}
+                  label="Copy address"
+                  showLabel
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-left transition-colors hover:bg-[#3c3c3c]"
                   style={{ color: "var(--ink-2)" }}
-                >
-                  <Copy size={12} />
-                  Copy address
-                </button>
+                />
                 <a
                   href={`${selectedChain?.blockExplorerUrls[0] ?? ""}/address/${address}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={() => setWalletMenuOpen(false)}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors hover:bg-slate-50"
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors hover:bg-[#3c3c3c]"
                   style={{ color: "var(--ink-2)" }}
                 >
                   <ExternalLink size={12} />
@@ -118,7 +118,7 @@ export default function IdeTopBar({ address, onConnect, onDisconnect, selectedCh
                 <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
                 <button
                   onClick={() => { onDisconnect(); setWalletMenuOpen(false); }}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors hover:bg-red-50"
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors hover:bg-[#4a2928]"
                   style={{ color: "var(--danger)" }}
                 >
                   <LogOut size={12} />

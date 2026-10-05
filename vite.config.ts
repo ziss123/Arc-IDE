@@ -1,10 +1,9 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
-import { nodePolyfills } from 'vite-plugin-node-polyfills'
 
 export default defineConfig({
-  plugins: [react(), nodePolyfills()],
+  plugins: [react()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -17,31 +16,26 @@ export default defineConfig({
       'react-dom',
       'react-dom/client',
       'react/jsx-runtime',
-      '@tanstack/react-query',
-      'wagmi',
-      'wagmi/chains',
-      'wagmi/connectors',
-      'viem',
-      'viem/chains',
-      'connectkit',
-      'framer-motion',
       'lucide-react',
-      'sonner',
-      'clsx',
-      'tailwind-merge',
-      'vite-plugin-node-polyfills/shims/buffer',
-      'vite-plugin-node-polyfills/shims/global',
-      'vite-plugin-node-polyfills/shims/process',
     ],
   },
   server: {
-    allowedHosts: true,
-    cors: true,
     proxy: {
       '/api': {
         target: 'http://localhost:3001',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
+        configure: (proxy) => {
+          proxy.on('error', (error, _request, response) => {
+            console.error('Compile server proxy error:', error.message)
+            if (response.headersSent) return
+            response.writeHead(503, { 'Content-Type': 'application/json' })
+            response.end(JSON.stringify({
+              error: 'Compile server is unavailable at http://localhost:3001.',
+              details: 'Start it in a second terminal with "npm run server", then retry.',
+            }))
+          })
+        },
       },
     },
   },

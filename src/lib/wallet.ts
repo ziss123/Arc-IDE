@@ -17,16 +17,17 @@ export function hasWallet(): boolean {
 
 export async function connectWallet(): Promise<{ provider: BrowserProvider; signer: JsonRpcSigner; address: string }> {
   const win = window as unknown as { ethereum?: { request: (args: { method: string; params?: unknown[] }) => Promise<unknown> } };
-  if (!win.ethereum) throw new Error("MetaMask atau wallet EVM lain tidak terdeteksi di browser.");
+  if (!win.ethereum) throw new Error("No compatible EVM wallet was detected in this browser.");
   const provider = new BrowserProvider(win.ethereum);
   const accounts = (await provider.send("eth_requestAccounts", [])) as string[];
+  if (accounts.length === 0) throw new Error("The wallet did not return an account. Unlock it and try again.");
   const signer = await provider.getSigner();
   return { provider, signer, address: accounts[0] };
 }
 
 export async function switchToChain(chain: ArcChain): Promise<void> {
   const win = window as unknown as { ethereum?: { request: (args: { method: string; params?: unknown[] }) => Promise<unknown> } };
-  if (!win.ethereum) throw new Error("Wallet tidak terdeteksi.");
+  if (!win.ethereum) throw new Error("No compatible wallet was detected.");
   try {
     await win.ethereum.request({
       method: "wallet_switchEthereumChain",
@@ -47,8 +48,17 @@ export async function switchToChain(chain: ArcChain): Promise<void> {
           },
         ],
       });
+      await win.ethereum.request({
+        method: "wallet_switchEthereumChain",
+        params: [{ chainId: chain.chainIdHex }],
+      });
     } else {
       throw err;
     }
+  }
+
+  const activeChainId = await win.ethereum.request({ method: "eth_chainId" });
+  if (typeof activeChainId !== "string" || activeChainId.toLowerCase() !== chain.chainIdHex.toLowerCase()) {
+    throw new Error(`The wallet did not switch to ${chain.chainName}. Check the active network in your wallet.`);
   }
 }
