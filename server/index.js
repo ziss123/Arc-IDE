@@ -63,7 +63,16 @@ app.post("/compile", (req, res) => {
 
   const errors = (output.errors || []).filter((e) => e.severity === "error");
   if (errors.length) {
-    return res.status(400).json({ errors: errors.map((e) => e.formattedMessage) });
+    return res.status(400).json({
+      errors: errors.map((e) => e.formattedMessage),
+      diagnostics: errors.map((e) => ({
+        severity: e.severity,
+        message: e.message,
+        fileName: e.sourceLocation?.file,
+        start: e.sourceLocation?.start,
+        end: e.sourceLocation?.end,
+      })),
+    });
   }
 
   const contracts = output.contracts?.[fileName];
@@ -90,6 +99,13 @@ app.post("/compile", (req, res) => {
       abi: compiled.abi,
       bytecode: "0x" + compiled.evm.bytecode.object,
       warnings: (output.errors || []).map((e) => e.formattedMessage),
+      diagnostics: (output.errors || []).map((e) => ({
+        severity: e.severity,
+        message: e.message,
+        fileName: e.sourceLocation?.file,
+        start: e.sourceLocation?.start,
+        end: e.sourceLocation?.end,
+      })),
     });
   }
 
@@ -106,6 +122,13 @@ app.post("/compile", (req, res) => {
     abi: compiled.abi,
     bytecode: "0x" + compiled.evm.bytecode.object,
     warnings: (output.errors || []).map((e) => e.formattedMessage),
+    diagnostics: (output.errors || []).map((e) => ({
+      severity: e.severity,
+      message: e.message,
+      fileName: e.sourceLocation?.file,
+      start: e.sourceLocation?.start,
+      end: e.sourceLocation?.end,
+    })),
   });
 });
 

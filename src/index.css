@@ -3,38 +3,64 @@
 @tailwind utilities;
 
 :root {
-  --bg: #1e1e1e;
-  --surface: #252526;
-  --surface-strong: #333333;
-  --surface-muted: #252526;
-  --ink: #cccccc;
-  --ink-2: #c5c5c5;
-  --muted: #9d9d9d;
-  --subtle: #858585;
-  --border: #3c3c3c;
-  --border-strong: #555555;
-  --accent: #007acc;
-  --accent-hover: #3794ff;
-  --accent-muted: rgba(0,122,204,0.18);
-  --accent-text: #3794ff;
-  --success: #4ec9b0;
-  --danger: #f48771;
-  --warn: #cca700;
+  --bg: #151020;
+  --surface: #211a33;
+  --surface-strong: #30264a;
+  --surface-muted: #1b152b;
+  --ink: #f7f4ff;
+  --ink-2: #ddd5f7;
+  --muted: #b0a4d1;
+  --subtle: #897da8;
+  --border: #382d52;
+  --border-strong: #544473;
+  --accent: #7858f5;
+  --accent-hover: #a18bff;
+  --accent-muted: rgba(120,88,245,0.2);
+  --accent-text: #b2a1ff;
+  --success: #48e0b0;
+  --danger: #ff827f;
+  --warn: #f0c66c;
 }
 
 * { box-sizing: border-box; }
 
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: 'DM Sans', 'Segoe UI', sans-serif;
   background: var(--bg);
   color: var(--ink);
   min-height: 100dvh;
   overflow: hidden;
+  font-feature-settings: "ss01" on;
 }
 
-.display { font-family: 'Space Grotesk', sans-serif; letter-spacing: -0.03em; }
+.display { font-family: 'Space Grotesk', 'DM Sans', sans-serif; letter-spacing: -0.03em; }
 .mono { font-family: 'JetBrains Mono', Menlo, monospace; }
+
+.qms-topbar-pattern {
+  background-color: #7657f5;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px),
+    linear-gradient(110deg, #7858f5, #7050eb);
+  background-size: 64px 64px, 64px 64px, 100% 100%;
+}
+
+.qms-button-light {
+  background: #f8f6ff !important;
+  border: 1px solid #f8f6ff !important;
+  color: #7050eb !important;
+}
+.qms-button-light:hover:not(:disabled) {
+  background: #e7e1ff !important;
+}
+
+.monaco-editor .monaco-editor-background {
+  background-image:
+    linear-gradient(rgba(183,160,255,0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(183,160,255,0.018) 1px, transparent 1px);
+  background-size: 56px 56px;
+}
 
 .copy-action { position: relative; display: inline-flex; align-items: center; }
 .copy-action-button {

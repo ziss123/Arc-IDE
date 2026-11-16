@@ -1,5 +1,7 @@
 import { useState, useRef, useCallback } from "react";
 import { Trash2, ExternalLink, GripHorizontal } from "lucide-react";
+import { readNumberPreference, writePreference } from "../lib/preferences";
+import type { CompileDiagnostic } from "../lib/compileAndDeploy";
 
 export interface LogEntry {
   text: string;
@@ -7,11 +9,13 @@ export interface LogEntry {
   category: string;
   time: string;
   explorerUrl?: string;
+  diagnostic?: CompileDiagnostic;
 }
 
 interface Props {
   logs: LogEntry[];
   onClear: () => void;
+  onNavigateToDiagnostic: (diagnostic: CompileDiagnostic) => void;
 }
 
 const FILTERS = ["All", "Compile", "Deploy", "Wallet", "Network", "Contract", "Info"] as const;
@@ -31,10 +35,10 @@ const TYPE_BG: Record<LogEntry["type"], string> = {
   error: "rgba(244,135,113,0.12)",
 };
 
-export default function IdeLogsPanel({ logs, onClear }: Props) {
+export default function IdeLogsPanel({ logs, onClear, onNavigateToDiagnostic }: Props) {
   const [filter, setFilter] = useState<Filter>("All");
   const [search, setSearch] = useState("");
-  const [height, setHeight] = useState(160);
+  const [height, setHeight] = useState(() => readNumberPreference("qms-ide-logs-height", 160, 80, Math.max(80, window.innerHeight - 160)));
   const dragging = useRef(false);
   const startY = useRef(0);
   const startH = useRef(0);
@@ -45,8 +49,9 @@ export default function IdeLogsPanel({ logs, onClear }: Props) {
     startH.current = height;
     const onMove = (ev: MouseEvent) => {
       if (!dragging.current) return;
-      const next = Math.max(80, Math.min(500, startH.current - (ev.clientY - startY.current)));
+      const next = Math.max(80, Math.min(Math.max(80, window.innerHeight - 160), startH.current - (ev.clientY - startY.current)));
       setHeight(next);
+      writePreference("qms-ide-logs-height", next);
     };
     const onUp = () => {
       dragging.current = false;
@@ -116,7 +121,7 @@ export default function IdeLogsPanel({ logs, onClear }: Props) {
               style={{
                 background: filter === f ? "var(--accent-muted)" : "transparent",
                 color: filter === f ? "var(--accent-hover)" : "var(--subtle)",
-                border: `1px solid ${filter === f ? "rgba(59,130,246,0.25)" : "transparent"}`,
+                border: `1px solid ${filter === f ? "rgba(161,139,255,0.25)" : "transparent"}`,
                 fontWeight: filter === f ? 600 : 400,
               }}
             >
@@ -135,7 +140,7 @@ export default function IdeLogsPanel({ logs, onClear }: Props) {
               {t}
             </span>
           ))}
-          <button onClick={onClear} title="Clear logs" className="p-1 rounded ml-1 transition-colors hover:bg-[#3c3c3c]" style={{ color: "var(--subtle)" }}>
+          <button onClick={onClear} title="Clear logs" className="p-1 rounded ml-1 transition-colors hover:bg-[#382d52]" style={{ color: "var(--subtle)" }}>
             <Trash2 size={12} />
           </button>
         </div>
@@ -157,7 +162,21 @@ export default function IdeLogsPanel({ logs, onClear }: Props) {
             >
               {l.category}
             </span>
-            <span className="flex-1 break-all" style={{ color: TYPE_COLORS[l.type] }}>{l.text}</span>
+            {l.diagnostic?.line ? (
+              <button
+                type="button"
+                onClick={() => {
+                  if (l.diagnostic) onNavigateToDiagnostic(l.diagnostic);
+                }}
+                className="flex-1 break-all text-left hover:underline"
+                title={`Go to line ${l.diagnostic.line}`}
+                style={{ color: TYPE_COLORS[l.type] }}
+              >
+                {l.text}
+              </button>
+            ) : (
+              <span className="flex-1 break-all" style={{ color: TYPE_COLORS[l.type] }}>{l.text}</span>
+            )}
             {l.explorerUrl && (
               <a href={l.explorerUrl} target="_blank" rel="noopener noreferrer" className="shrink-0" style={{ color: "var(--accent-hover)" }}>
                 <ExternalLink size={11} />

@@ -1,24 +1,13 @@
-import type { ArcChain } from "./wallet";
+import type { EvmChain } from "./wallet";
 
-export const ARC_TESTNET: ArcChain = {
-  key: "arc-testnet",
-  chainIdHex: "0x4cef52",
-  chainIdDec: 5042002,
-  chainName: "Arc Testnet",
-  nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 },
-  rpcUrls: ["https://rpc.testnet.arc.io"],
-  blockExplorerUrls: ["https://explorer.testnet.arc.io"],
-  faucet: "https://faucet.circle.com",
+export const QMS_TESTNET: EvmChain = {
+  key: "qms-testnet",
+  chainIdHex: "0x4c18",
+  chainIdDec: 19480,
+  chainName: "QMS Testnet",
+  nativeCurrency: { name: "QMS", symbol: "QMS", decimals: 18 },
+  rpcUrls: ["https://rpc.testnet.qms.finance"],
+  blockExplorerUrls: ["https://testnet.qmsscan.io"],
 };
 
-export const ARC_MAINNET: ArcChain = {
-  key: "arc-mainnet",
-  chainIdHex: "0x13b2",
-  chainIdDec: 5042,
-  chainName: "Arc Mainnet",
-  nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 },
-  rpcUrls: ["https://rpc.mainnet.arc.io"],
-  blockExplorerUrls: ["https://explorer.arc.io"],
-};
-
-export const CHAINS: ArcChain[] = [ARC_TESTNET, ARC_MAINNET];
+export const CHAINS: EvmChain[] = [QMS_TESTNET];

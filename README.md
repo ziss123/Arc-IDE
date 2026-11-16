@@ -1,16 +1,17 @@
-# ArcIDE
+# QMS IDE
 
-ArcIDE is a browser-based Solidity IDE for compiling, deploying, and interacting with smart contracts on Arc Testnet and Arc Mainnet. It uses React, TypeScript, Monaco Editor, Vite, and ethers.js.
+QMS IDE is a browser-based Solidity IDE for compiling, deploying, and interacting with smart contracts on QMS Testnet. It uses React, TypeScript, Monaco Editor, Vite, and ethers.js.
 
 ## Features
 
-- **Solidity editor** — Monaco Editor with Solidity syntax highlighting
-- **Compile and deploy** — Compile locally through the included Solidity compile server, then deploy with an EVM wallet
+- **Solidity editor** — Monaco Editor with Solidity syntax highlighting, compiler markers, and autosave
+- **Compile and deploy** — Compile locally, navigate from compiler errors to their source lines, review estimated gas and fees, then confirm deployment with an EVM wallet
 - **Run & Debug** — Call contract read methods and send write transactions
 - **Contract history** — Keep deployed contract records in browser storage
 - **Logs** — Search messages and filter by activity type
-- **File explorer** — Create, upload, download, and remove Solidity files
-- **Starter contract** — `HelloArc.sol` is the only contract included by default
+- **File explorer** — Create, upload, download, remove, and back up or restore Solidity workspaces
+- **Resizable workspace** — Adjust panels and retain your layout preferences in this browser
+- **Starter contract** — `HelloQMS.sol` is the only contract included by default
 
 ## Requirements
 
@@ -36,7 +37,7 @@ npm run server
 
 The API listens on `http://localhost:3001`.
 
-**Terminal 2 — ArcIDE frontend**
+**Terminal 2 — QMS IDE frontend**
 
 ```bash
 npm run dev
@@ -60,16 +61,15 @@ npm run build
 
 The production frontend is generated in `dist/`. The compile API must also be deployed; the static frontend cannot compile contracts by itself.
 
-## Arc networks
+## Networks
 
 | Network | Chain ID | RPC URL | Explorer |
 | --- | ---: | --- | --- |
-| Arc Testnet | `5042002` | `https://rpc.testnet.arc.io` | `https://explorer.testnet.arc.io` |
-| Arc Mainnet | `5042` | `https://rpc.mainnet.arc.io` | `https://explorer.arc.io` |
+| QMS Testnet | `19480` | `https://rpc.testnet.qms.finance` | `https://testnet.qmsscan.io` |
 
-The native currency is USDC with 18 decimals. Switching to Mainnet displays a confirmation before changing the wallet network. Mainnet transactions use real funds and are irreversible.
+QMS Testnet uses QMS as its native currency, with 18 decimals.
 
-If your wallet does not have the network configured, ArcIDE asks the wallet to add it when you select the network.
+If your wallet does not have the network configured, QMS IDE asks the wallet to add it when you select the network.
 
 ## Deploy the compile API
 
@@ -85,9 +85,9 @@ For a public deployment, configure the backend URL and CORS policy for your fron
 ```text
 api/compile.js                  Vercel-compatible compile endpoint
 server/index.js                 Local Express compile server
-src/App.tsx                     Application state and starter HelloArc.sol
+src/App.tsx                     Application state and starter HelloQMS.sol
 src/components/                 Editor, explorer, history, logs, and wallet UI
-src/lib/chains.ts               Arc Testnet and Mainnet configuration
+src/lib/chains.ts               QMS Testnet configuration
 src/lib/compileAndDeploy.ts     Compile and deployment client
 src/lib/contractInteract.ts     Contract interaction and argument validation
 src/lib/wallet.ts               Wallet connection and network switching

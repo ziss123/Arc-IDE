@@ -11,12 +11,13 @@ interface Props {
   deploying: boolean;
   compiling: boolean;
   hasWallet: boolean;
+  saveStatus: "saving" | "saved" | "error";
 }
 
 export default function IdeTabBar({
   openFiles, activeFile, onSelect, onClose,
   panelOpen, onTogglePanel,
-  onDeploy, deploying, compiling, hasWallet,
+  onDeploy, deploying, compiling, hasWallet, saveStatus,
 }: Props) {
   const busy = deploying || compiling;
 
@@ -47,6 +48,15 @@ export default function IdeTabBar({
             >
               <FileCode size={12} style={{ opacity: 0.6 }} />
               <span className="mono" style={{ fontSize: 12 }}>{name}</span>
+              {name === activeFile && saveStatus !== "saved" && (
+                <span
+                  aria-label={saveStatus === "error" ? "File save failed" : "Saving changes"}
+                  title={saveStatus === "error" ? "Could not save changes" : "Saving changes"}
+                  style={{ color: saveStatus === "error" ? "var(--danger)" : "var(--warn)", fontSize: 10 }}
+                >
+                  {saveStatus === "error" ? "!" : "●"}
+                </span>
+              )}
               <button
                 onClick={(e) => { e.stopPropagation(); onClose(name); }}
                 className="opacity-0 group-hover:opacity-100 ml-0.5 p-0.5 rounded transition-all"
@@ -70,9 +80,9 @@ export default function IdeTabBar({
             title={!hasWallet ? "Connect wallet first" : busy ? "Processing..." : `Deploy ${activeFile}`}
             className="flex items-center gap-2 px-5 font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed self-stretch"
             style={{
-              background: busy ? "#1e293b" : "#0f172a",
+              background: busy ? "var(--surface-strong)" : "var(--accent)",
               color: "#fff",
-              borderRight: "1px solid var(--border)",
+              borderRight: "1px solid rgba(255,255,255,0.16)",
               letterSpacing: "0.02em",
               fontSize: 13,
             }}
