@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { ChevronDown, Wallet, LogOut, ExternalLink } from "lucide-react";
+import { ChevronDown, Wallet, AlertTriangle, LogOut, ExternalLink } from "lucide-react";
 import { CHAINS } from "../lib/chains";
 import CopyButton from "./CopyButton";
 
@@ -12,6 +12,7 @@ interface Props {
 }
 
 export default function IdeTopBar({ address, onConnect, onDisconnect, selectedChainKey, onChainChange }: Props) {
+  const isMainnet = selectedChainKey === "arc-mainnet";
   const [walletMenuOpen, setWalletMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -30,28 +31,34 @@ export default function IdeTopBar({ address, onConnect, onDisconnect, selectedCh
 
   return (
     <div
-      className="qms-topbar-pattern flex items-center justify-between px-4 shrink-0"
-      style={{
-        height: 44,
-        borderBottom: "2px solid rgba(255,255,255,0.32)",
-        boxShadow: "0 1px 0 rgba(20,12,43,0.8)",
-      }}
+      className="flex items-center justify-between px-4 shrink-0"
+      style={{ height: 40, background: "var(--surface)", borderBottom: "1px solid var(--border)" }}
     >
-      {/* Left: QMS IDE wordmark */}
+      {/* Left: ArcIDE wordmark */}
       <span className="select-none flex items-baseline gap-0" style={{ letterSpacing: "-0.02em" }}>
-        <span style={{ fontSize: 16, fontWeight: 700, fontFamily: "'Space Grotesk', sans-serif", color: "#fff" }}>QMS</span>
-        <span style={{ fontSize: 16, fontWeight: 400, fontFamily: "'Space Grotesk', sans-serif", color: "rgba(255,255,255,0.78)" }}> IDE</span>
+        <span style={{ fontSize: 16, fontWeight: 600, fontFamily: "'Space Grotesk', sans-serif", color: "var(--ink)" }}>Arc</span>
+        <span style={{ fontSize: 16, fontWeight: 300, fontFamily: "'Space Grotesk', sans-serif", color: "var(--ink-2)" }}>IDE</span>
       </span>
 
       {/* Right: wallet + chain */}
       <div className="flex items-center gap-2">
+        {isMainnet && (
+          <div
+            className="flex items-center gap-1 px-2 py-1 rounded text-xs"
+            style={{ background: "rgba(245,158,11,0.10)", border: "1px solid rgba(245,158,11,0.3)", color: "var(--warn)" }}
+          >
+            <AlertTriangle size={11} />
+            <span>Mainnet</span>
+          </div>
+        )}
+
         {/* Chain selector */}
         <div className="relative">
           <select
             value={selectedChainKey}
             onChange={(e) => onChainChange(e.target.value)}
             className="appearance-none rounded text-xs pl-2.5 pr-6 py-1.5 cursor-pointer focus:outline-none"
-            style={{ background: "rgba(45,30,103,0.24)", border: "1px solid rgba(255,255,255,0.22)", color: "#fff" }}
+            style={{ background: "var(--surface-strong)", border: "1px solid var(--border)", color: "var(--ink-2)" }}
           >
             {CHAINS.map((c) => (
               <option key={c.key} value={c.key}>{c.chainName}</option>
@@ -65,7 +72,8 @@ export default function IdeTopBar({ address, onConnect, onDisconnect, selectedCh
           <div className="relative" ref={menuRef}>
             <button
               onClick={() => setWalletMenuOpen((v) => !v)}
-              className="qms-button-light flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-colors"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-colors"
+              style={{ background: "var(--accent)", border: "1px solid var(--accent)", color: "#fff" }}
             >
               <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
               <span className="mono">{address.slice(0, 6)}...{address.slice(-4)}</span>
@@ -93,7 +101,7 @@ export default function IdeTopBar({ address, onConnect, onDisconnect, selectedCh
                   text={address}
                   label="Copy address"
                   showLabel
-                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-left transition-colors hover:bg-[#382d52]"
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-left transition-colors hover:bg-[#3c3c3c]"
                   style={{ color: "var(--ink-2)" }}
                 />
                 <a
@@ -101,7 +109,7 @@ export default function IdeTopBar({ address, onConnect, onDisconnect, selectedCh
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={() => setWalletMenuOpen(false)}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors hover:bg-[#382d52]"
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors hover:bg-[#3c3c3c]"
                   style={{ color: "var(--ink-2)" }}
                 >
                   <ExternalLink size={12} />
@@ -110,7 +118,7 @@ export default function IdeTopBar({ address, onConnect, onDisconnect, selectedCh
                 <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
                 <button
                   onClick={() => { onDisconnect(); setWalletMenuOpen(false); }}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors hover:bg-[#4c2938]"
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors hover:bg-[#4a2928]"
                   style={{ color: "var(--danger)" }}
                 >
                   <LogOut size={12} />
@@ -122,7 +130,8 @@ export default function IdeTopBar({ address, onConnect, onDisconnect, selectedCh
         ) : (
           <button
             onClick={() => onConnect()}
-            className="qms-button-light flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors"
+            style={{ background: "var(--accent)", border: "1px solid var(--accent)", color: "#fff" }}
           >
             <Wallet size={12} />
             Connect Wallet

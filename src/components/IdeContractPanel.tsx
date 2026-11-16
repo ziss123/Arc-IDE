@@ -8,7 +8,6 @@ import { BrowserProvider, Contract, JsonRpcProvider, parseUnits } from "ethers";
 import { coerceArg, formatResult, type AbiParameter } from "../lib/contractInteract";
 import { CHAINS } from "../lib/chains";
 import CopyButton from "./CopyButton";
-import { readNumberPreference, writePreference } from "../lib/preferences";
 
 interface ActiveContract {
   contractName: string;
@@ -57,9 +56,6 @@ interface PendingDeploy {
   abi: InterfaceAbi;
   bytecode: string;
   constructorInputs: AbiInput[];
-  deployer: string;
-  gasEstimate: string | null;
-  estimatedCost: string | null;
 }
 
 interface Props {
@@ -70,7 +66,6 @@ interface Props {
   onDeploy: () => Promise<void>;
   onConfirmDeploy: () => Promise<void>;
   deploying: boolean;
-  estimatingDeploy: boolean;
   compiling: boolean;
   pendingDeploy: PendingDeploy | null;
   constructorArgs: Record<string, string>;
@@ -149,11 +144,11 @@ function friendlyContractError(error: unknown, network: string): string {
 
 export default function IdeContractPanel({
   contract, signer, onLog, onClose, onDeploy, onConfirmDeploy,
-  deploying, estimatingDeploy, compiling, pendingDeploy, constructorArgs, onConstructorArgChange,
+  deploying, compiling, pendingDeploy, constructorArgs, onConstructorArgChange,
 }: Props) {
   const [states, setStates] = useState<Record<string, FnState>>({});
   const [txHistory, setTxHistory] = useState<TxRecord[]>([]);
-  const [width, setWidth] = useState(() => readNumberPreference("qms-ide-run-width", 300, 240, 560));
+  const [width, setWidth] = useState(300);
   const dragging = useRef(false);
   const startX = useRef(0);
   const startW = useRef(0);
@@ -169,9 +164,7 @@ export default function IdeContractPanel({
     startW.current = width;
     const onMove = (ev: MouseEvent) => {
       if (!dragging.current) return;
-      const nextWidth = Math.max(240, Math.min(560, startW.current - (ev.clientX - startX.current)));
-      setWidth(nextWidth);
-      writePreference("qms-ide-run-width", nextWidth);
+      setWidth(Math.max(240, Math.min(560, startW.current - (ev.clientX - startX.current))));
     };
     const onUp = () => {
       dragging.current = false;
@@ -182,7 +175,7 @@ export default function IdeContractPanel({
     window.addEventListener("mouseup", onUp);
   }, [width]);
 
-  const busy = compiling || deploying || estimatingDeploy;
+  const busy = compiling || deploying;
 
   const abiArr = contract
     ? (Array.isArray(contract.abi) ? contract.abi : []) as AbiFunction[]
@@ -349,13 +342,11 @@ export default function IdeContractPanel({
           {/* Constructor args form */}
           {pendingDeploy && (
             <div className="rounded-lg p-3 space-y-3" style={{ background: "var(--surface)", border: "1px solid var(--accent)" }}>
-              <p className="text-xs font-semibold" style={{ color: "var(--accent)" }}>Deployment Review</p>
+              <p className="text-xs font-semibold" style={{ color: "var(--accent)" }}>Constructor Arguments</p>
               <p className="text-xs" style={{ color: "var(--muted)" }}>
                 Deploy <strong>{pendingDeploy.contractName}</strong> from <span className="mono">{pendingDeploy.fileName}</span> to{" "}
                 <strong>{CHAINS.find((chain) => chain.key === pendingDeploy.chainKey)?.chainName ?? "the selected network"}</strong>.
-                {pendingDeploy.constructorInputs.length > 0
-                  ? "Fill in all arguments, then estimate gas to review the deployment."
-                  : "Review the deployment details and estimate gas before confirming."}
+                Fill in all arguments then click <strong>Confirm Deploy</strong>.
               </p>
               {pendingDeploy.constructorInputs.map((inp, index) => (
                 <div key={index} className="space-y-1">
@@ -368,42 +359,19 @@ export default function IdeContractPanel({
                     placeholder={inp.type}
                     value={constructorArgs[String(index)] ?? ""}
                     onChange={(e) => onConstructorArgChange(index, e.target.value)}
-                    disabled={estimatingDeploy || deploying}
                     className="w-full rounded px-2 py-1.5 text-xs mono focus:outline-none"
                     style={{ background: "var(--surface-muted)", border: "1px solid var(--border)", color: "var(--ink)" }}
                   />
                 </div>
               ))}
-              <div className="space-y-1 rounded-md p-2 text-xs" style={{ background: "var(--surface-muted)", border: "1px solid var(--border)" }}>
-                <div className="flex justify-between gap-2">
-                  <span style={{ color: "var(--muted)" }}>Network</span>
-                  <strong className="text-right">{CHAINS.find((chain) => chain.key === pendingDeploy.chainKey)?.chainName ?? "Unknown"}</strong>
-                </div>
-                <div className="flex justify-between gap-2">
-                  <span style={{ color: "var(--muted)" }}>Deployer</span>
-                  <span className="mono">{pendingDeploy.deployer.slice(0, 8)}...{pendingDeploy.deployer.slice(-6)}</span>
-                </div>
-                {pendingDeploy.gasEstimate && (
-                  <>
-                    <div className="flex justify-between gap-2">
-                      <span style={{ color: "var(--muted)" }}>Estimated gas</span>
-                      <span className="mono">{BigInt(pendingDeploy.gasEstimate).toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between gap-2">
-                      <span style={{ color: "var(--muted)" }}>Estimated fee</span>
-                      <span className="mono">{pendingDeploy.estimatedCost ?? "Unavailable"} {CHAINS[0].nativeCurrency.symbol}</span>
-                    </div>
-                  </>
-                )}
-              </div>
               <button
                 onClick={() => { void onConfirmDeploy(); }}
-                disabled={deploying || estimatingDeploy}
+                disabled={deploying}
                 className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded text-xs font-semibold disabled:opacity-50"
                 style={{ background: "var(--accent)", color: "#fff" }}
               >
-                {deploying || estimatingDeploy ? <Loader2 size={11} className="animate-spin" /> : <Rocket size={11} />}
-                {deploying ? "Deploying..." : estimatingDeploy ? "Estimating gas..." : pendingDeploy.gasEstimate ? "Confirm & Deploy" : "Estimate Gas & Review"}
+                {deploying ? <Loader2 size={11} className="animate-spin" /> : <Rocket size={11} />}
+                {deploying ? "Deploying..." : "Confirm Deploy"}
               </button>
             </div>
           )}
@@ -435,7 +403,7 @@ export default function IdeContractPanel({
                   text={contract.address}
                   label="Copy contract address"
                   iconSize={11}
-                  className="rounded p-0.5 transition-colors hover:bg-[#382d52]"
+                  className="rounded p-0.5 transition-colors hover:bg-[#3c3c3c]"
                   style={{ color: "var(--subtle)" }}
                 />
                 <a href={`${contract.explorerBase}/address/${contract.address}`} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent-text)" }}>

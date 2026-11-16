@@ -56,16 +56,7 @@ export default function handler(req, res) {
 
   const errors = (output.errors ?? []).filter((error) => error.severity === "error");
   if (errors.length > 0) {
-    return res.status(400).json({
-      errors: errors.map((error) => error.formattedMessage),
-      diagnostics: errors.map((error) => ({
-        severity: error.severity,
-        message: error.message,
-        fileName: error.sourceLocation?.file,
-        start: error.sourceLocation?.start,
-        end: error.sourceLocation?.end,
-      })),
-    });
+    return res.status(400).json({ errors: errors.map((error) => error.formattedMessage) });
   }
 
   const contracts = output.contracts?.[fileName];
@@ -86,12 +77,5 @@ export default function handler(req, res) {
     abi: compiled.abi,
     bytecode: `0x${compiled.evm.bytecode.object}`,
     warnings: (output.errors ?? []).map((error) => error.formattedMessage),
-    diagnostics: (output.errors ?? []).map((error) => ({
-      severity: error.severity,
-      message: error.message,
-      fileName: error.sourceLocation?.file,
-      start: error.sourceLocation?.start,
-      end: error.sourceLocation?.end,
-    })),
   });
 }

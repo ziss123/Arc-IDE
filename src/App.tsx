@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import IdeTopBar from "./components/IdeTopBar";
 import IdeActivityBar from "./components/IdeActivityBar";
 import IdeFilePanel from "./components/IdeFilePanel";
@@ -7,21 +7,13 @@ import IdeEditor from "./components/IdeEditor";
 import IdeLogsPanel, { type LogEntry } from "./components/IdeLogsPanel";
 import IdeContractPanel from "./components/IdeContractPanel";
 import IdeHistoryPanel, { type HistoryEntry } from "./components/IdeHistoryPanel";
-import { connectWallet, hasWallet, switchToChain, type EvmChain } from "./lib/wallet";
-import {
-  compileContract,
-  deployContract,
-  estimateDeployment,
-  CompileFailure,
-  type CompileDiagnostic,
-  type CompileResult,
-} from "./lib/compileAndDeploy";
+import MainnetWarningModal from "./components/MainnetWarningModal";
+import { connectWallet, hasWallet, switchToChain, type ArcChain } from "./lib/wallet";
+import { compileContract, deployContract, type CompileResult } from "./lib/compileAndDeploy";
 import { coerceArg, type AbiParameter } from "./lib/contractInteract";
-import { CHAINS, QMS_TESTNET } from "./lib/chains";
+import { CHAINS, ARC_TESTNET } from "./lib/chains";
 import { BrowserProvider } from "ethers";
 import type { JsonRpcSigner, InterfaceAbi } from "ethers";
-import type * as monacoEditor from "monaco-editor";
-import { readBooleanPreference, writePreference } from "./lib/preferences";
 
 interface FileEntry {
   name: string;
@@ -47,10 +39,9 @@ interface DeployRecord {
   timestamp: string;
 }
 
-const STORAGE_KEY = "qms-ide-files-v1";
-const CONTRACTS_KEY = "qms-ide-contracts-v1";
-const HISTORY_KEY = "qms-ide-history-v1";
-const WORKSPACE_FORMAT = "qms-ide-workspace";
+const STORAGE_KEY = "arc-ide-files-v6";
+const LEGACY_STORAGE_KEY = "arc-ide-files-v5";
+const CONTRACTS_KEY = "arc-ide-contracts-v2";
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -467,7 +458,7 @@ pragma solidity ^0.8.28;
 
 /// @title TestFaucet — faucet native token untuk testing di testnet
 /// @notice Owner deposit native token, pengguna claim sekali per 24 jam.
-/// @dev Deploy di QMS Testnet, isi dengan test QMS, lalu bagikan ke tester.
+/// @dev Deploy di Arc Testnet, isi dengan test USDC/native, lalu bagikan ke tester.
 contract TestFaucet {
     address public owner;
     uint256 public claimAmount;
@@ -527,9 +518,9 @@ contract TestFaucet {
 const TPL_HELLO = `// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-/// @title HelloQMS — a minimal contract for QMS Testnet
+/// @title HelloArc — a minimal contract for Arc Testnet and Mainnet
 /// @notice Store and read an on-chain message.
-contract HelloQMS {
+contract HelloArc {
     string public message;
     address public owner;
     uint256 public updateCount;
@@ -559,7 +550,7 @@ contract HelloQMS {
 }
 `;
 
-const DEFAULT_FILES: FileEntry[] = [{ name: "HelloQMS.sol", content: TPL_HELLO }];
+const DEFAULT_FILES: FileEntry[] = [{ name: "HelloArc.sol", content: TPL_HELLO }];
 
 function loadFiles(): FileEntry[] {
   try {
@@ -577,8 +568,28 @@ function loadFiles(): FileEntry[] {
         );
       }
     }
+
+    const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (legacy) {
+      const parsed: unknown = JSON.parse(legacy);
+      const helloArc = Array.isArray(parsed)
+        ? parsed.find((file): file is FileEntry =>
+          !!file &&
+          typeof file === "object" &&
+          "name" in file &&
+          file.name === "HelloArc.sol" &&
+          "content" in file &&
+          typeof file.content === "string"
+        )
+        : undefined;
+      const files = helloArc ? [helloArc] : DEFAULT_FILES;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(files));
+      localStorage.removeItem(LEGACY_STORAGE_KEY);
+      return files;
+    }
   } catch {
     localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
   }
   return DEFAULT_FILES;
 }
@@ -639,7 +650,6 @@ function loadContracts(): PersistedContracts {
 
 export default function App() {
   const [files, setFiles] = useState<FileEntry[]>(loadFiles);
-  const [saveStatus, setSaveStatus] = useState<"saving" | "saved" | "error">("saved");
   const [openFiles, setOpenFiles] = useState<string[]>(() => {
     const f = loadFiles();
     return f.length > 0 ? [f[0].name] : [];
@@ -647,7 +657,7 @@ export default function App() {
   const [activeFile, setActiveFile] = useState<string | null>(() => loadFiles()[0]?.name ?? null);
   const [address, setAddress] = useState<string | null>(null);
   const [signer, setSigner] = useState<JsonRpcSigner | null>(null);
-  const [chainKey, setChainKey] = useState(QMS_TESTNET.key);
+  const [chainKey, setChainKey] = useState(ARC_TESTNET.key);
   const [compiling, setCompiling] = useState(false);
   const [deploying, setDeploying] = useState(false);
   const [pendingDeploy, setPendingDeploy] = useState<{
@@ -657,63 +667,44 @@ export default function App() {
     abi: InterfaceAbi;
     bytecode: string;
     constructorInputs: AbiParameter[];
-    deployer: string;
-    gasEstimate: string | null;
-    estimatedCost: string | null;
   } | null>(null);
-  const [estimatingDeploy, setEstimatingDeploy] = useState(false);
   const [constructorArgs, setConstructorArgs] = useState<Record<string, string>>({});
-  const [compilerDiagnostics, setCompilerDiagnostics] = useState<CompileDiagnostic[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [deployHistory, setDeployHistory] = useState<DeployRecord[]>(() => loadContracts().history);
   const [contractsByFile, setContractsByFile] = useState<Record<string, ActiveContract>>(() => loadContracts().byFile);
-  const [panelOpen, setPanelOpen] = useState(() => readBooleanPreference("qms-ide-run-open", true));
+  const [panelOpen, setPanelOpen] = useState(true);
   const [activePanel, setActivePanel] = useState<"files" | "run" | "history" | null>("files");
+  const [showMainnetModal, setShowMainnetModal] = useState(false);
+  const [pendingChainKey, setPendingChainKey] = useState<string | null>(null);
   const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>(() => {
     try {
-      const saved = localStorage.getItem(HISTORY_KEY);
+      const saved = localStorage.getItem("arc-ide-history-v1");
       if (saved) return JSON.parse(saved) as HistoryEntry[];
     } catch { /* ignore */ }
     return [];
   });
-  const editorRef = useRef<monacoEditor.editor.IStandaloneCodeEditor | null>(null);
 
   const log = useCallback((
     text: string,
     type: LogEntry["type"] = "info",
     category = "info",
     explorerUrl?: string,
-    diagnostic?: CompileDiagnostic,
   ) => setLogs((prev) => [
     ...prev,
-    { text, type, category, time: new Date().toLocaleTimeString(), explorerUrl, diagnostic },
+    { text, type, category, time: new Date().toLocaleTimeString(), explorerUrl },
   ].slice(-500)), []);
 
   useEffect(() => {
-    setSaveStatus("saving");
-    const timer = window.setTimeout(() => {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(files));
-        setSaveStatus("saved");
-      } catch (error: unknown) {
-        setSaveStatus("error");
-        log(`Could not save workspace: ${errorMessage(error)}`, "error", "info");
-      }
-    }, 250);
-    return () => window.clearTimeout(timer);
-  }, [files, log]);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(files));
+  }, [files]);
 
   useEffect(() => {
     localStorage.setItem(CONTRACTS_KEY, JSON.stringify({ byFile: contractsByFile, history: deployHistory }));
   }, [contractsByFile, deployHistory]);
 
   useEffect(() => {
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(historyEntries));
+    localStorage.setItem("arc-ide-history-v1", JSON.stringify(historyEntries));
   }, [historyEntries]);
-
-  useEffect(() => {
-    writePreference("qms-ide-run-open", panelOpen);
-  }, [panelOpen]);
 
   // Refresh the signer whenever the wallet account or network changes.
   const refreshSigner = useCallback(async (): Promise<JsonRpcSigner | null> => {
@@ -775,16 +766,11 @@ export default function App() {
 
   const updateContent = (value: string) => {
     setFiles((prev) => prev.map((f) => (f.name === activeFile ? { ...f, content: value } : f)));
-    setCompilerDiagnostics([]);
-    setPendingDeploy(null);
-    setConstructorArgs({});
   };
 
   const openFile = (name: string) => {
     if (!openFiles.includes(name)) setOpenFiles((p) => [...p, name]);
     setActiveFile(name);
-    if (pendingDeploy && pendingDeploy.fileName !== name) setPendingDeploy(null);
-    setCompilerDiagnostics([]);
   };
 
   const closeFile = (name: string) => {
@@ -807,6 +793,15 @@ export default function App() {
     log(`New file created: ${finalName}`);
   };
 
+  const handleUpload = (name: string, content: string) => {
+    setFiles((prev) => {
+      const exists = prev.some((f) => f.name === name);
+      return exists ? prev.map((f) => (f.name === name ? { ...f, content } : f)) : [...prev, { name, content }];
+    });
+    openFile(name);
+    log(`File uploaded: ${name}`);
+  };
+
   const handleDownload = () => {
     if (!activeFile) return;
     const blob = new Blob([activeContent], { type: "text/plain" });
@@ -815,56 +810,8 @@ export default function App() {
     a.href = url;
     a.download = activeFile;
     a.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    URL.revokeObjectURL(url);
     log(`File downloaded: ${activeFile}`);
-  };
-
-  const handleImportWorkspace = async (file: File) => {
-    if (file.size > 10 * 1024 * 1024) {
-      log("Workspace backup exceeds the 10 MB import limit.", "error");
-      return;
-    }
-    try {
-      const parsed: unknown = JSON.parse(await file.text());
-      if (
-        !parsed ||
-        typeof parsed !== "object" ||
-        !("format" in parsed) ||
-        parsed.format !== WORKSPACE_FORMAT ||
-        !("version" in parsed) ||
-        parsed.version !== 1 ||
-        !("files" in parsed) ||
-        !Array.isArray(parsed.files) ||
-        parsed.files.length > 500
-      ) {
-        throw new Error("This file is not a supported QMS IDE workspace backup.");
-      }
-      const imported = parsed.files.filter((entry): entry is FileEntry =>
-        !!entry &&
-        typeof entry === "object" &&
-        "name" in entry &&
-        typeof entry.name === "string" &&
-        entry.name.length > 0 &&
-        entry.name.length <= 255 &&
-        !/[\\/]/.test(entry.name) &&
-        "content" in entry &&
-        typeof entry.content === "string"
-      );
-      if (imported.length !== parsed.files.length) {
-        throw new Error("The backup contains invalid file entries.");
-      }
-      if (new Set(imported.map((entry) => entry.name)).size !== imported.length) {
-        throw new Error("The backup contains duplicate file names.");
-      }
-      if (!window.confirm(`Replace the current workspace with ${imported.length} imported file(s)?`)) return;
-      setFiles(imported);
-      setOpenFiles(imported[0] ? [imported[0].name] : []);
-      setActiveFile(imported[0]?.name ?? null);
-      setCompilerDiagnostics([]);
-      log(`Workspace imported (${imported.length} file${imported.length === 1 ? "" : "s"}).`, "success");
-    } catch (error: unknown) {
-      log(`Workspace import failed: ${errorMessage(error)}`, "error");
-    }
   };
 
   const handleDeleteFile = (name: string) => {
@@ -872,7 +819,6 @@ export default function App() {
     setFiles(remaining);
     setOpenFiles((prev) => prev.filter((n) => n !== name));
     if (activeFile === name) setActiveFile(remaining[0]?.name ?? null);
-    if (pendingDeploy?.fileName === name) setPendingDeploy(null);
     log(`File deleted: ${name}`, "warn");
   };
 
@@ -924,6 +870,11 @@ export default function App() {
   };
 
   const handleChainChange = async (key: string) => {
+    if (key === "arc-mainnet") {
+      setPendingChainKey(key);
+      setShowMainnetModal(true);
+      return;
+    }
     await doChainSwitch(key);
   };
 
@@ -951,13 +902,10 @@ export default function App() {
   /** Phase 1: compile and show the constructor-argument form when needed. */
   const handleDeploy = async () => {
     if (!activeFile) { log("No active file selected.", "error", "deploy"); return; }
-    setPendingDeploy(null);
-    setCompilerDiagnostics([]);
     const chain = CHAINS.find((c) => c.key === chainKey);
     if (!chain) { log("The selected network is not supported.", "error", "network"); return; }
 
     let deploymentSigner: JsonRpcSigner | null;
-    let deployerAddress: string;
     try {
       deploymentSigner = await refreshSigner();
       if (!deploymentSigner) {
@@ -976,7 +924,6 @@ export default function App() {
         }
         log(`Switched to ${chain.chainName}.`, "success", "network");
       }
-      deployerAddress = await deploymentSigner.getAddress();
     } catch (e: unknown) {
       log(`Could not prepare the wallet for deployment: ${errorMessage(e)}`, "error", "network");
       return;
@@ -987,32 +934,10 @@ export default function App() {
     try {
       log(`Compiling ${activeFile}...`, "info", "compile");
       compiled = await compileContract(activeFile, activeContent);
-      setCompilerDiagnostics(compiled.diagnostics);
       compiled.warnings.forEach((w) => log(w, "warn", "compile"));
       log(`Compiled: ${compiled.contractName}`, "success", "compile");
     } catch (e: unknown) {
-      if (e instanceof CompileFailure) {
-        setCompilerDiagnostics(e.diagnostics);
-        const located = e.diagnostics.filter((diagnostic) => diagnostic.line !== undefined);
-        if (located.length > 0) {
-          e.diagnostics.forEach((diagnostic) => {
-            log(
-              diagnostic.line
-                ? `Line ${diagnostic.line}, column ${diagnostic.column ?? 1}: ${diagnostic.message}`
-                : diagnostic.message,
-              "error",
-              "compile",
-              undefined,
-              diagnostic.line ? diagnostic : undefined,
-            );
-          });
-        } else {
-          log(`Compile failed: ${e.message}`, "error", "compile");
-        }
-      } else {
-        setCompilerDiagnostics([]);
-        log(`Compile failed: ${errorMessage(e)}`, "error", "compile");
-      }
+      log(`Compile failed: ${errorMessage(e)}`, "error", "compile");
       return;
     } finally {
       setCompiling(false);
@@ -1020,46 +945,25 @@ export default function App() {
 
     const ctorInputs = getConstructorInputs(compiled.abi);
 
-    setPendingDeploy({
-      contractName: compiled.contractName,
-      fileName: activeFile,
-      chainKey: chain.key,
-      abi: compiled.abi,
-      bytecode: compiled.bytecode,
-      constructorInputs: ctorInputs,
-      deployer: deployerAddress,
-      gasEstimate: null,
-      estimatedCost: null,
-    });
-    setConstructorArgs({});
-    setPanelOpen(true);
-    log(
-      ctorInputs.length > 0
-        ? `Contract compiled with ${ctorInputs.length} constructor argument(s). Review the inputs and estimate gas before deploying.`
-        : "Contract compiled. Review the deployment and estimate gas before deploying.",
-      "info",
-      "deploy",
-    );
-  };
-
-  const navigateToDiagnostic = (diagnostic: CompileDiagnostic) => {
-    const targetFile = diagnostic.fileName;
-    if (targetFile && files.some((file) => file.name === targetFile)) {
-      setActiveFile(targetFile);
-      setOpenFiles((current) => current.includes(targetFile) ? current : [...current, targetFile]);
-    }
-    if (!diagnostic.line) return;
-    window.requestAnimationFrame(() => {
-      editorRef.current?.revealLineInCenter(diagnostic.line!);
-      editorRef.current?.setPosition({
-        lineNumber: diagnostic.line!,
-        column: diagnostic.column ?? 1,
+    if (ctorInputs.length > 0) {
+      setPendingDeploy({
+        contractName: compiled.contractName,
+        fileName: activeFile,
+        chainKey: chain.key,
+        abi: compiled.abi,
+        bytecode: compiled.bytecode,
+        constructorInputs: ctorInputs,
       });
-      editorRef.current?.focus();
-    });
+      setConstructorArgs({});
+      setPanelOpen(true);
+      log(`Contract has ${ctorInputs.length} constructor argument(s). Fill in the form in the Run & Debug panel then click "Confirm Deploy".`, "info", "deploy");
+      return;
+    }
+
+    await executeDeploy(compiled.abi, compiled.bytecode, compiled.contractName, [], chain, activeFile, deploymentSigner);
   };
 
-  /** Estimate first; a second confirmation sends the deployment transaction. */
+  /** Phase 2: deploy after validating the constructor arguments. */
   const handleConfirmDeploy = async () => {
     if (!pendingDeploy) return;
     const chain = CHAINS.find((c) => c.key === pendingDeploy.chainKey);
@@ -1091,52 +995,6 @@ export default function App() {
       log(`Switch your wallet to ${chain.chainName} before confirming deployment.`, "error", "network");
       return;
     }
-    let deployerAddress: string;
-    try {
-      deployerAddress = await signerForDeploy.getAddress();
-    } catch (error: unknown) {
-      log(`Could not read the deployment wallet address: ${errorMessage(error)}`, "error", "wallet");
-      return;
-    }
-
-    if (pendingDeploy.gasEstimate && pendingDeploy.deployer.toLowerCase() !== deployerAddress.toLowerCase()) {
-      setPendingDeploy((current) => current
-        ? { ...current, deployer: deployerAddress, gasEstimate: null, estimatedCost: null }
-        : current);
-      log("The connected wallet changed. Estimate gas again to review this deployment.", "warn", "deploy");
-      return;
-    }
-
-    if (!pendingDeploy.gasEstimate) {
-      setEstimatingDeploy(true);
-      try {
-        const estimate = await estimateDeployment({
-          abi: pendingDeploy.abi,
-          bytecode: pendingDeploy.bytecode,
-          signer: signerForDeploy,
-          constructorArgs: args,
-          decimals: chain.nativeCurrency.decimals,
-        });
-        setPendingDeploy((current) => current && current.fileName === pendingDeploy.fileName
-          ? {
-            ...current,
-            deployer: deployerAddress,
-            gasEstimate: estimate.gas.toString(),
-            estimatedCost: estimate.cost,
-          }
-          : current);
-        log(
-          `Deployment estimate: ${estimate.gas.toString()} gas${estimate.cost ? `, approximately ${estimate.cost} ${chain.nativeCurrency.symbol}` : ""}. Review the details, then confirm deployment.`,
-          "success",
-          "deploy",
-        );
-      } catch (error: unknown) {
-        log(`Could not estimate deployment gas: ${errorMessage(error)}`, "error", "deploy");
-      } finally {
-        setEstimatingDeploy(false);
-      }
-      return;
-    }
 
     const succeeded = await executeDeploy(
       pendingDeploy.abi,
@@ -1158,7 +1016,7 @@ export default function App() {
     bytecode: string,
     contractName: string,
     args: unknown[],
-    chain: EvmChain,
+    chain: ArcChain,
     fileName: string,
     deploymentSigner: JsonRpcSigner | null,
   ): Promise<boolean> => {
@@ -1175,9 +1033,6 @@ export default function App() {
         bytecode,
         signer: deploymentSigner,
         constructorArgs: args,
-        onTransactionSent: (hash) => {
-          log(`Deployment transaction submitted: ${hash}`, "info", "deploy", `${chain.blockExplorerUrls[0]}/tx/${hash}`);
-        },
       });
       if (!txHash) throw new Error("Deployment was mined without a transaction hash.");
       const explorerBase = chain.blockExplorerUrls[0];
@@ -1224,6 +1079,23 @@ export default function App() {
       className="flex flex-col"
       style={{ height: "100dvh", background: "var(--bg)", color: "var(--ink)" }}
     >
+      {/* Mainnet warning modal */}
+      {showMainnetModal && (
+        <MainnetWarningModal
+          onConfirm={async () => {
+            const switched = pendingChainKey ? await doChainSwitch(pendingChainKey) : false;
+            if (!switched) return false;
+            setShowMainnetModal(false);
+            setPendingChainKey(null);
+            return true;
+          }}
+          onCancel={() => {
+            setShowMainnetModal(false);
+            setPendingChainKey(null);
+          }}
+        />
+      )}
+
       {/* Top bar */}
       <IdeTopBar
         address={address}
@@ -1252,9 +1124,9 @@ export default function App() {
                 activeFile={activeFile}
                 onSelect={openFile}
                 onNewFile={handleNewFile}
+                onUpload={handleUpload}
                 onDownload={handleDownload}
                 onDelete={handleDeleteFile}
-                onImportWorkspace={(file) => { void handleImportWorkspace(file); }}
               />
             )}
 
@@ -1264,11 +1136,7 @@ export default function App() {
           <IdeTabBar
             openFiles={openFiles}
             activeFile={activeFile}
-            onSelect={(name) => {
-              setActiveFile(name);
-              if (pendingDeploy && pendingDeploy.fileName !== name) setPendingDeploy(null);
-              setCompilerDiagnostics([]);
-            }}
+            onSelect={setActiveFile}
             onClose={closeFile}
             panelOpen={panelOpen}
             onTogglePanel={() => setPanelOpen((v) => !v)}
@@ -1276,20 +1144,12 @@ export default function App() {
             deploying={deploying}
             compiling={compiling}
             hasWallet={!!signer}
-            saveStatus={saveStatus}
           />
 
           {/* Editor */}
           <div className="flex-1 min-h-0">
             {activeFile ? (
-              <IdeEditor
-                value={activeContent}
-                onChange={updateContent}
-                onPasteError={(message) => log(`Paste failed: ${message}`, "error", "info")}
-                diagnostics={compilerDiagnostics}
-                onEditorMount={(editor) => { editorRef.current = editor; }}
-                fileName={activeFile}
-              />
+              <IdeEditor value={activeContent} onChange={updateContent} fileName={activeFile} />
             ) : (
               <div
                 className="flex flex-col items-center justify-center h-full text-sm"
@@ -1301,11 +1161,7 @@ export default function App() {
           </div>
 
           {/* Logs */}
-          <IdeLogsPanel
-            logs={logs}
-            onClear={() => setLogs([])}
-            onNavigateToDiagnostic={navigateToDiagnostic}
-          />
+          <IdeLogsPanel logs={logs} onClear={() => setLogs([])} />
             </div>
 
             {/* Run & Debug panel kanan — hanya muncul setelah deploy berhasil */}
@@ -1318,16 +1174,10 @@ export default function App() {
                 onDeploy={handleDeploy}
                 onConfirmDeploy={handleConfirmDeploy}
                 deploying={deploying}
-                estimatingDeploy={estimatingDeploy}
                 compiling={compiling}
                 pendingDeploy={pendingDeploy}
                 constructorArgs={constructorArgs}
-                onConstructorArgChange={(name, val) => {
-                  setConstructorArgs((prev) => ({ ...prev, [name]: val }));
-                  setPendingDeploy((pending) => pending
-                    ? { ...pending, gasEstimate: null, estimatedCost: null }
-                    : pending);
-                }}
+                onConstructorArgChange={(name, val) => setConstructorArgs((p) => ({ ...p, [name]: val }))}
               />
             )}
           </>
@@ -1335,15 +1185,12 @@ export default function App() {
       </div>
       <div
         className="flex items-center justify-between px-2 shrink-0"
-        style={{ height: 24, background: "#0d0916", color: "var(--ink-2)", fontSize: 11, borderTop: "1px solid var(--border)" }}
+        style={{ height: 22, background: "#007acc", color: "#fff", fontSize: 11 }}
       >
         <div className="flex items-center gap-3 min-w-0">
-          <span className="font-medium">QMS IDE</span>
+          <span className="font-medium">ArcIDE</span>
           <span>{CHAINS.find((chain) => chain.key === chainKey)?.chainName ?? chainKey}</span>
           <span>{address ? "Wallet connected" : "No wallet connected"}</span>
-          <span role="status" aria-live="polite" style={{ color: saveStatus === "error" ? "var(--danger)" : "var(--muted)" }}>
-            {saveStatus === "saving" ? "Saving..." : saveStatus === "error" ? "Save failed" : "All changes saved"}
-          </span>
         </div>
         <span className="mono">{activeFile?.endsWith(".sol") ? "Solidity" : activeFile?.split(".").pop() ?? "Ready"}</span>
       </div>

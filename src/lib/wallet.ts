@@ -1,6 +1,6 @@
 import { BrowserProvider, JsonRpcSigner } from "ethers";
 
-export interface EvmChain {
+export interface ArcChain {
   key: string;
   chainIdHex: string;
   chainIdDec: number;
@@ -25,7 +25,7 @@ export async function connectWallet(): Promise<{ provider: BrowserProvider; sign
   return { provider, signer, address: accounts[0] };
 }
 
-export async function switchToChain(chain: EvmChain): Promise<void> {
+export async function switchToChain(chain: ArcChain): Promise<void> {
   const win = window as unknown as { ethereum?: { request: (args: { method: string; params?: unknown[] }) => Promise<unknown> } };
   if (!win.ethereum) throw new Error("No compatible wallet was detected.");
   try {

@@ -1,14 +1,9 @@
 import Editor from "@monaco-editor/react";
 import type * as monacoEditor from "monaco-editor";
-import { useEffect, useRef } from "react";
-import type { CompileDiagnostic } from "../lib/compileAndDeploy";
 
 interface Props {
   value: string;
   onChange: (value: string) => void;
-  onPasteError: (message: string) => void;
-  diagnostics: CompileDiagnostic[];
-  onEditorMount: (editor: monacoEditor.editor.IStandaloneCodeEditor) => void;
   fileName?: string;
 }
 
@@ -105,32 +100,32 @@ const registerSolidity = (monaco: typeof monacoEditor) => {
     base: "vs-dark",
     inherit: true,
     rules: [
-      { token: "keyword",        foreground: "B69CFF" },
-      { token: "keyword.type",   foreground: "5FE0BE" },
-      { token: "type.identifier",foreground: "5FE0BE" },
-      { token: "function",       foreground: "F1D58A" },
-      { token: "identifier",     foreground: "D4C7FF" },
-      { token: "variable.predefined", foreground: "C1AEFF" },
-      { token: "constant",       foreground: "B69CFF" },
-      { token: "number",         foreground: "A9D99B" },
-      { token: "number.hex",     foreground: "A9D99B" },
-      { token: "string",         foreground: "F2A88D" },
-      { token: "string.quote",   foreground: "F2A88D" },
-      { token: "string.escape",  foreground: "F1D58A" },
-      { token: "comment",        foreground: "82769E", fontStyle: "italic" },
-      { token: "operator",       foreground: "DCD5EE" },
-      { token: "delimiter",      foreground: "DCD5EE" },
-      { token: "@brackets",      foreground: "9E83FF" },
+      { token: "keyword",        foreground: "569CD6" },
+      { token: "keyword.type",   foreground: "4EC9B0" },
+      { token: "type.identifier",foreground: "4EC9B0" },
+      { token: "function",       foreground: "DCDCAA" },
+      { token: "identifier",     foreground: "9CDCFE" },
+      { token: "variable.predefined", foreground: "9CDCFE" },
+      { token: "constant",       foreground: "569CD6" },
+      { token: "number",         foreground: "B5CEA8" },
+      { token: "number.hex",     foreground: "B5CEA8" },
+      { token: "string",         foreground: "CE9178" },
+      { token: "string.quote",   foreground: "CE9178" },
+      { token: "string.escape",  foreground: "D7BA7D" },
+      { token: "comment",        foreground: "6A9955", fontStyle: "italic" },
+      { token: "operator",       foreground: "D4D4D4" },
+      { token: "delimiter",      foreground: "D4D4D4" },
+      { token: "@brackets",      foreground: "FFD700" },
     ],
     colors: {
-      "editor.background":            "#171126",
-      "editor.foreground":            "#E5DFF4",
-      "editorLineNumber.foreground":  "#71668A",
-      "editorLineNumber.activeForeground": "#C1B5DD",
-      "editor.selectionBackground":   "#493879",
-      "editor.lineHighlightBackground": "#211936",
-      "editorCursor.foreground":      "#C9B9FF",
-      "editor.inactiveSelectionBackground": "#382B5B",
+      "editor.background":            "#1E1E1E",
+      "editor.foreground":            "#D4D4D4",
+      "editorLineNumber.foreground":  "#858585",
+      "editorLineNumber.activeForeground": "#C6C6C6",
+      "editor.selectionBackground":   "#264F78",
+      "editor.lineHighlightBackground": "#2A2D2E",
+      "editorCursor.foreground":      "#AEAFAD",
+      "editor.inactiveSelectionBackground": "#3A3D41",
     },
   });
 };
@@ -139,36 +134,11 @@ const beforeMount = (monaco: typeof monacoEditor) => {
   registerSolidity(monaco);
 };
 
-export default function IdeEditor({ value, onChange, onPasteError, diagnostics, onEditorMount, fileName }: Props) {
-  const editorRef = useRef<monacoEditor.editor.IStandaloneCodeEditor | null>(null);
-  const monacoRef = useRef<typeof monacoEditor | null>(null);
+export default function IdeEditor({ value, onChange, fileName }: Props) {
   const ext = fileName?.split(".").pop() ?? "sol";
   const isSolidity = ext === "sol";
   const language = isSolidity ? "solidity" : ext === "json" ? "json" : "plaintext";
   const theme = isSolidity ? "solidity-dark" : "vs-dark";
-
-  useEffect(() => {
-    const editor = editorRef.current;
-    const monaco = monacoRef.current;
-    const model = editor?.getModel();
-    if (!model || !monaco) return;
-    monaco.editor.setModelMarkers(
-      model,
-      "qms-ide-compiler",
-      diagnostics
-        .filter((diagnostic) => diagnostic.line !== undefined)
-        .map((diagnostic) => ({
-          severity: diagnostic.severity === "error"
-            ? monaco.MarkerSeverity.Error
-            : monaco.MarkerSeverity.Warning,
-          message: diagnostic.message,
-          startLineNumber: diagnostic.line!,
-          startColumn: diagnostic.column ?? 1,
-          endLineNumber: diagnostic.line!,
-          endColumn: (diagnostic.column ?? 1) + 1,
-        })),
-    );
-  }, [diagnostics, fileName]);
 
   return (
     <Editor
@@ -177,91 +147,6 @@ export default function IdeEditor({ value, onChange, onPasteError, diagnostics, 
       theme={theme}
       value={value}
       beforeMount={beforeMount}
-      onMount={(editor, monaco) => {
-        editorRef.current = editor;
-        monacoRef.current = monaco;
-        onEditorMount(editor);
-        const observedRoots = new Set<ParentNode>();
-        const menuObserver = new MutationObserver(() => {
-          for (const root of observedRoots) scanRoot(root);
-        });
-        const observeRoot = (root: ParentNode) => {
-          if (observedRoots.has(root)) return;
-          observedRoots.add(root);
-          menuObserver.observe(root, { childList: true, subtree: true });
-          scanRoot(root);
-        };
-        const scanRoot = (root: ParentNode) => {
-          root.querySelectorAll(".monaco-menu").forEach((menu) => {
-            menu.querySelectorAll(".action-item").forEach((item) => {
-              const label = item.querySelector(".action-label");
-              if (label?.textContent?.trim() === "Paste (QMS IDE)") {
-                item.setAttribute("data-qms-paste", "true");
-                label.textContent = "Paste";
-              }
-            });
-            menu.querySelectorAll(".action-item").forEach((item) => {
-              if (
-                item.querySelector(".action-label")?.textContent?.trim() === "Paste"
-                && item.getAttribute("data-qms-paste") !== "true"
-              ) {
-                item.remove();
-              }
-            });
-          });
-
-          root.querySelectorAll(".shadow-root-host").forEach((host) => {
-            if (host instanceof HTMLElement && host.shadowRoot) observeRoot(host.shadowRoot);
-          });
-        };
-        observeRoot(document.body);
-        const editorNode = editor.getDomNode();
-        if (editorNode) observeRoot(editorNode);
-        editor.onDidDispose(() => menuObserver.disconnect());
-
-        editor.addAction({
-          id: "qms-ide.paste",
-          label: "Paste (QMS IDE)",
-          contextMenuGroupId: "9_cutcopypaste",
-          contextMenuOrder: 3.5,
-          run: async (activeEditor) => {
-            try {
-              const model = activeEditor.getModel();
-              if (!model) return;
-
-              const range = activeEditor.getSelection() ?? (() => {
-                const position = activeEditor.getPosition();
-                if (!position) {
-                  throw new Error("Editor cursor position is unavailable. Click in the editor and try again.");
-                }
-                return {
-                  startLineNumber: position.lineNumber,
-                  startColumn: position.column,
-                  endLineNumber: position.lineNumber,
-                  endColumn: position.column,
-                };
-              })();
-
-              if (!navigator.clipboard?.readText) {
-                throw new Error("Clipboard access is unavailable. Use a secure HTTPS connection and allow clipboard access.");
-              }
-
-              const text = await navigator.clipboard.readText();
-              if (!text) return;
-
-              activeEditor.setSelection(range);
-              activeEditor.executeEdits("qms-ide.clipboardPaste", [{
-                range,
-                text,
-                forceMoveMarkers: true,
-              }]);
-              activeEditor.focus();
-            } catch (error: unknown) {
-              onPasteError(error instanceof Error ? error.message : String(error));
-            }
-          },
-        });
-      }}
       onChange={(v) => onChange(v ?? "")}
       options={{
         fontSize: 13,

@@ -110,7 +110,7 @@ export default function IdeHistoryPanel({ history, onLoad, onDelete }: Props) {
             visibleHistory.map((entry) => (
               <div
                 key={`${entry.network}:${entry.address}`}
-                className="group grid items-center gap-4 px-6 py-3 transition-colors hover:bg-[#211a33]"
+                className="group grid items-center gap-4 px-6 py-3 transition-colors hover:bg-[#2a2d2e]"
                 style={{
                   gridTemplateColumns: "minmax(180px, 1.15fr) minmax(160px, 1fr) minmax(180px, 1fr) 130px 120px 92px",
                   borderBottom: "1px solid var(--border)",
@@ -139,7 +139,7 @@ export default function IdeHistoryPanel({ history, onLoad, onDelete }: Props) {
                   <CopyButton
                     text={entry.address}
                     label={`Copy ${entry.contractName} address`}
-                    className="shrink-0 rounded p-1 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-[#382d52]"
+                    className="shrink-0 rounded p-1 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-[#3c3c3c]"
                     style={{ color: "var(--muted)" }}
                   />
                 </div>
@@ -160,7 +160,7 @@ export default function IdeHistoryPanel({ history, onLoad, onDelete }: Props) {
                     href={`${entry.explorerBase}/address/${entry.address}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="rounded p-1.5 hover:bg-[#382d52]"
+                    className="rounded p-1.5 hover:bg-[#3c3c3c]"
                     style={{ color: "var(--muted)" }}
                     title="Open contract in explorer"
                     aria-label={`Open ${entry.contractName} in explorer`}
@@ -169,7 +169,7 @@ export default function IdeHistoryPanel({ history, onLoad, onDelete }: Props) {
                   </a>
                   <button
                     onClick={() => onDelete(entry.network, entry.address)}
-                    className="rounded p-1.5 hover:bg-[#4c2938]"
+                    className="rounded p-1.5 hover:bg-[#4a2928]"
                     style={{ color: "var(--danger)" }}
                     title="Remove from history"
                     aria-label={`Remove ${entry.contractName} from history`}

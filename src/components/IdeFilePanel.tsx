@@ -1,6 +1,5 @@
 import { useState, useRef, useCallback } from "react";
-import { FilePlus, Download, Trash2, FileCode, Check, X, FolderOpen } from "lucide-react";
-import { readNumberPreference, writePreference } from "../lib/preferences";
+import { FilePlus, Upload, Download, Trash2, FileCode, Check, X } from "lucide-react";
 
 interface FileEntry {
   name: string;
@@ -12,14 +11,14 @@ interface Props {
   activeFile: string | null;
   onSelect: (name: string) => void;
   onNewFile: (name: string) => void;
+  onUpload: (name: string, content: string) => void;
   onDownload: () => void;
   onDelete: (name: string) => void;
-  onImportWorkspace: (file: File) => void;
 }
 
-export default function IdeFilePanel({ files, activeFile, onSelect, onNewFile, onDownload, onDelete, onImportWorkspace }: Props) {
-  const workspaceInputRef = useRef<HTMLInputElement>(null);
-  const [width, setWidth] = useState(() => readNumberPreference("qms-ide-files-width", 220, 160, 400));
+export default function IdeFilePanel({ files, activeFile, onSelect, onNewFile, onUpload, onDownload, onDelete }: Props) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [width, setWidth] = useState(220);
   const dragging = useRef(false);
   const startX = useRef(0);
   const startW = useRef(0);
@@ -36,7 +35,6 @@ export default function IdeFilePanel({ files, activeFile, onSelect, onNewFile, o
       if (!dragging.current) return;
       const next = Math.max(160, Math.min(400, startW.current + ev.clientX - startX.current));
       setWidth(next);
-      writePreference("qms-ide-files-width", next);
     };
     const onUp = () => {
       dragging.current = false;
@@ -46,6 +44,17 @@ export default function IdeFilePanel({ files, activeFile, onSelect, onNewFile, o
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
   }, [width]);
+
+  const handleUploadClick = () => fileInputRef.current?.click();
+
+  const handleFileChosen = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => onUpload(file.name, typeof reader.result === "string" ? reader.result : "");
+    reader.readAsText(file);
+    e.target.value = "";
+  };
 
   const handleNewConfirm = () => {
     const trimmed = newFileName.trim();
@@ -79,28 +88,18 @@ export default function IdeFilePanel({ files, activeFile, onSelect, onNewFile, o
             <button
               title="New file"
               onClick={() => { setShowNewInput(true); setNewFileName(""); setConfirmDelete(null); }}
-              className="p-1 rounded transition-colors hover:bg-[#382d52]"
+              className="p-1 rounded transition-colors hover:bg-[#3c3c3c]"
               style={{ color: "var(--subtle)" }}
             >
               <FilePlus size={13} />
             </button>
-            <button title="Download active file" onClick={onDownload} className="p-1 rounded transition-colors hover:bg-[#382d52]" style={{ color: "var(--subtle)" }}>
+            <button title="Upload .sol file" onClick={handleUploadClick} className="p-1 rounded transition-colors hover:bg-[#3c3c3c]" style={{ color: "var(--subtle)" }}>
+              <Upload size={13} />
+            </button>
+            <button title="Download active file" onClick={onDownload} className="p-1 rounded transition-colors hover:bg-[#3c3c3c]" style={{ color: "var(--subtle)" }}>
               <Download size={13} />
             </button>
-            <button title="Import workspace backup" onClick={() => workspaceInputRef.current?.click()} className="p-1 rounded transition-colors hover:bg-[#382d52]" style={{ color: "var(--subtle)" }}>
-              <FolderOpen size={13} />
-            </button>
-            <input
-              ref={workspaceInputRef}
-              type="file"
-              accept="application/json,.json"
-              className="hidden"
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                if (file) onImportWorkspace(file);
-                event.target.value = "";
-              }}
-            />
+            <input ref={fileInputRef} type="file" accept=".sol" onChange={handleFileChosen} className="hidden" />
           </div>
         </div>
 
